@@ -24,6 +24,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
   level,
   duration,
   timelineWidth,
+  msPerPixel,
   parentConstraints,
   onUpdate,
   onMultiUpdate,
@@ -33,7 +34,8 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
   isLeftOuterMarker = false,
   isRightOuterMarker = false,
   children,
-  onDragStart
+  onDragStart,
+  isActivated = false
 }) => {
   // ドラッグ状態管理（React再レンダリングから完全保護）
   const dragStateRef = useRef<{
@@ -219,7 +221,6 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     
     if (multiSelected && import.meta.env.DEV) {
-      console.log(`[Marker:${unit.id}] ドラッグ開始: mouseX=${e.clientX}, start=${unit.start}, end=${unit.end}, 操作:${dragType}`);
     }
   }, [unit, level, onSelectionChange, onDragStart, isSelected, multiSelected]);
 
@@ -235,7 +236,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
 
     // ❗重要: 絶対座標を使用して移動量を計算
     const deltaX = e.clientX - dragData.startMouseX;
-    const pxPerMs = timelineWidth / duration;
+    const pxPerMs = msPerPixel ? 1 / msPerPixel : timelineWidth / duration;
     const deltaMs = deltaX / pxPerMs;
 
 
@@ -327,10 +328,11 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
 
   // スタイルの計算（新しいドラッグ状態を参照）
   const isDraggingState = dragStateRef.current.isDragging || dragState.isDragging;
-  const markerStyle = getMarkerStyle(level, isSelected, multiSelected, isDraggingState);
-  const pxPerMs = timelineWidth / duration;
-  const startX = (unit.start / duration) * timelineWidth;
-  const width = ((unit.end - unit.start) / duration) * timelineWidth;
+  const markerStyle = getMarkerStyle(level, isSelected, multiSelected, isDraggingState, isActivated);
+  // msPerPixelが指定されている場合はそれを使用、そうでなければ従来の計算
+  const pxPerMs = msPerPixel ? 1 / msPerPixel : timelineWidth / duration;
+  const startX = msPerPixel ? unit.start / msPerPixel : (unit.start / duration) * timelineWidth;
+  const width = msPerPixel ? (unit.end - unit.start) / msPerPixel : ((unit.end - unit.start) / duration) * timelineWidth;
 
   // 表示テキストの取得
   const displayText = getDisplayText(unit, level);
@@ -341,7 +343,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
 
   return (
     <div 
-      className={`hierarchical-marker ${level}-marker ${isSelected ? 'selected' : ''} ${multiSelected ? 'multi-selected' : ''}`}
+      className={`hierarchical-marker ${level}-marker ${isSelected ? 'selected' : ''} ${multiSelected ? 'multi-selected' : ''} ${isActivated ? 'activated' : ''}`}
       style={{
         position: 'absolute',
         left: `${startX}px`,

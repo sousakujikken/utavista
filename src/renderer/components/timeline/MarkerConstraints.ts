@@ -123,14 +123,12 @@ export const calculateResizeConstraints = (
  * 親オブジェクトIDを取得する
  */
 export const getParentObjectId = (objectId: string): string | null => {
-  const parts = objectId.split('_');
-  
-  if (parts.length >= 4 && parts[parts.length - 2] === 'char') {
-    // 文字の場合、親は単語
-    return parts.slice(0, parts.length - 2).join('_');
-  } else if (parts.length >= 4 && parts[parts.length - 2] === 'word') {
-    // 単語の場合、親はフレーズ
-    return parts.slice(0, parts.length - 2).join('_');
+  if (objectId.includes('_char_')) {
+    // 文字の場合: phrase_xxx_xxx_word_xxx_char_xxx -> phrase_xxx_xxx_word_xxx
+    return objectId.substring(0, objectId.lastIndexOf('_char_'));
+  } else if (objectId.includes('_word_')) {
+    // 単語の場合: phrase_xxx_xxx_word_xxx -> phrase_xxx_xxx
+    return objectId.substring(0, objectId.lastIndexOf('_word_'));
   }
   
   return null;
@@ -140,13 +138,13 @@ export const getParentObjectId = (objectId: string): string | null => {
  * オブジェクトIDから階層レベルを判定する
  */
 export const getMarkerLevel = (objectId: string): MarkerLevel => {
-  const parts = objectId.split('_');
-  
-  if (parts.length >= 4 && parts[parts.length - 2] === 'char') {
+  if (objectId.includes('_char_')) {
     return 'char';
-  } else if (parts.length >= 4 && parts[parts.length - 2] === 'word') {
+  } else if (objectId.includes('_word_')) {
     return 'word';
-  } else {
+  } else if (objectId.startsWith('phrase_')) {
     return 'phrase';
+  } else {
+    return 'phrase'; // デフォルト
   }
 };

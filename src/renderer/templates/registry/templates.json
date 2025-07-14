@@ -1,0 +1,22 @@
+{
+  "templates": [
+    {
+      "id": "wordslidetext",
+      "name": "単語スライドテキスト",
+      "importPath": "./WordSlideText",
+      "exportName": "WordSlideText"
+    },
+    {
+      "id": "flickerfadetemplate",
+      "name": "点滅フェードテキスト",
+      "importPath": "./FlickerFadeTemplate",
+      "exportName": "FlickerFadeTemplate"
+    },
+    {
+      "id": "glitchtext",
+      "name": "グリッチテキスト",
+      "importPath": "./GlitchText",
+      "exportName": "GlitchText"
+    }
+  ]
+}

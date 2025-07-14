@@ -1,96 +1,75 @@
 .lyrics-editor {
-  background-color: #1a1a1a;
-  color: #ffffff;
+  background-color: var(--bg-level-0);
+  color: var(--text-primary);
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  font-family: var(--font-primary);
 }
 
 .lyrics-editor-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid #333;
-  background-color: #222;
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-standard);
+  background-color: var(--bg-level-1);
 }
 
 .lyrics-editor-header h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--text-title);
   font-weight: normal;
+  color: var(--text-primary);
+  font-family: var(--font-primary);
 }
 
 .lyrics-editor-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-sm);
 }
 
-.save-button,
-.close-button {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
-}
-
-.save-button {
-  background-color: #09f;
-  color: white;
-}
-
-.save-button:hover {
-  background-color: #0088ee;
-}
-
-.close-button {
-  background-color: #444;
-  color: white;
-}
-
-.close-button:hover {
-  background-color: #555;
-}
+/* ボタンスタイルは共通コンポーネントを使用 */
 
 .save-status {
-  color: #4caf50;
-  font-size: 14px;
+  color: var(--color-success);
+  font-size: var(--text-body);
+  font-family: var(--font-primary);
 }
 
 .lyrics-editor-content {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--space-md);
 }
 
 .lyrics-table {
   width: 100%;
   border-collapse: collapse;
-  background-color: #222;
-  border-radius: 8px;
+  background-color: var(--bg-level-1);
+  border-radius: var(--radius-large);
   overflow: hidden;
 }
 
 .lyrics-table th,
 .lyrics-table td {
-  padding: 12px;
+  padding: var(--space-sm);
   text-align: left;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-standard);
+  font-family: var(--font-primary);
 }
 
 .lyrics-table th {
-  background-color: #2a2a2a;
+  background-color: var(--bg-level-3);
   font-weight: normal;
-  color: #aaa;
-  font-size: 14px;
+  color: var(--text-muted);
+  font-size: var(--text-body);
 }
 
 .lyrics-table tr:hover {
-  background-color: #2a2a2a;
+  background-color: var(--bg-level-3);
 }
 
 .editable-cell {
@@ -99,56 +78,47 @@
 }
 
 .editable-cell:hover {
-  background-color: #333;
+  background-color: var(--bg-level-5);
 }
 
 .time-cell {
-  font-family: monospace;
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
   width: 120px;
 }
 
 .edit-input {
   width: 100%;
-  padding: 4px 8px;
-  background-color: #111;
-  color: white;
-  border: 2px solid #09f;
-  border-radius: 4px;
+  padding: var(--space-xs) var(--space-sm);
+  background-color: var(--bg-level-0);
+  color: var(--text-primary);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-small);
   font-size: inherit;
   font-family: inherit;
   outline: none;
 }
 
 .time-input {
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .action-cell {
-  width: 100px;
+  width: 220px;
   text-align: center;
+  display: flex;
+  gap: var(--space-xs);
+  justify-content: center;
 }
 
-.delete-button {
-  padding: 6px 12px;
-  background-color: #ff4444;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background-color 0.2s;
-}
-
-.delete-button:hover {
-  background-color: #ff6666;
-}
+/* アクションボタンスタイルは共通コンポーネントを使用 */
 
 .no-lyrics {
   text-align: center;
-  padding: 48px;
-  color: #666;
-  font-size: 14px;
+  padding: var(--space-xxl);
+  color: var(--text-disabled);
+  font-size: var(--text-body);
+  font-family: var(--font-primary);
 }
 
 /* スクロールバーのスタイリング */
@@ -157,14 +127,40 @@
 }
 
 .lyrics-editor-content::-webkit-scrollbar-track {
-  background: #1a1a1a;
+  background: var(--bg-level-0);
 }
 
 .lyrics-editor-content::-webkit-scrollbar-thumb {
-  background: #444;
-  border-radius: 4px;
+  background: var(--color-accent);
+  border-radius: var(--radius-small);
 }
 
 .lyrics-editor-content::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: var(--color-accent-hover);
+}
+
+/* モーダルスタイル */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.modal-content {
+  background-color: var(--bg-level-0);
+  border-radius: var(--radius-large);
+  width: 90%;
+  max-width: 1000px;
+  height: 80%;
+  max-height: 800px;
+  overflow: hidden;
+  box-shadow: var(--shadow-xl);
+  z-index: var(--z-modal-content);
 }

@@ -11,12 +11,13 @@ export interface ProjectState {
   defaultTemplateId: string;
   lyricsData?: PhraseUnit[]; // 歌詞タイミング情報を含める
   currentTime?: number; // 現在の再生時間も保存
-  backgroundColor?: string; // 背景色設定（後方互換性のため残す）
-  backgroundConfig?: BackgroundConfig; // 新しい背景設定
+  backgroundConfig?: BackgroundConfig; // 背景設定
   stageConfig?: StageConfig; // ステージ設定
   // 音楽ファイル情報
   audioFileName?: string;
   audioFileDuration?: number;
+  // 個別設定情報
+  individualSettingsEnabled?: string[]; // 個別設定が有効化されたオブジェクトID
 }
 
 export class ProjectStateManager {

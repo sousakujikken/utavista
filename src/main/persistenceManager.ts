@@ -13,6 +13,20 @@ interface RecentFilesData {
   backgroundVideoFiles: RecentFile[];
 }
 
+interface FontBlacklistEntry {
+  fontFamily: string;
+  fontKey: string;  // family_weight_style
+  reason: string;
+  timestamp: number;
+  errorMessage?: string;
+}
+
+interface FontBlacklistData {
+  version: number;
+  blacklist: FontBlacklistEntry[];
+  updatedAt: number;
+}
+
 interface AutoSaveData {
   version: string;
   timestamp: number;
@@ -22,6 +36,7 @@ interface AutoSaveData {
     audioInfo: any;
     backgroundVideoInfo?: {
       fileName: string | null;
+      filePath: string | null;
     };
     stageConfig: any;
     selectedTemplate: string;
@@ -35,11 +50,13 @@ interface AutoSaveData {
 class PersistenceManager {
   private userDataPath: string;
   private autoSaveFilePath: string;
+  private fontBlacklistFilePath: string;
   private autoSaveInterval: NodeJS.Timeout | null = null;
   
   constructor() {
     this.userDataPath = app.getPath('userData');
     this.autoSaveFilePath = path.join(this.userDataPath, 'autosave.json');
+    this.fontBlacklistFilePath = path.join(this.userDataPath, 'font-blacklist.json');
   }
   
   async initialize() {
@@ -137,6 +154,27 @@ class PersistenceManager {
         return { success: true, files };
       } catch (error) {
         console.error('Failed to get recent background video files:', error);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+
+    // Font blacklist management
+    ipcMain.handle('persistence:save-font-blacklist', async (event, blacklist: FontBlacklistEntry[]) => {
+      try {
+        await this.saveFontBlacklist(blacklist);
+        return { success: true };
+      } catch (error) {
+        console.error('Failed to save font blacklist:', error);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+
+    ipcMain.handle('persistence:load-font-blacklist', async () => {
+      try {
+        const data = await this.loadFontBlacklist();
+        return { success: true, data };
+      } catch (error) {
+        console.error('Failed to load font blacklist:', error);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     });
@@ -362,6 +400,55 @@ class PersistenceManager {
 
     console.log(`PersistenceManager: Returning ${validFiles.length} valid ${type} files:`, validFiles);
     return validFiles;
+  }
+
+  private async saveFontBlacklist(blacklist: FontBlacklistEntry[]): Promise<void> {
+    console.log('PersistenceManager: Saving font blacklist');
+    
+    const data: FontBlacklistData = {
+      version: 1,
+      blacklist,
+      updatedAt: Date.now()
+    };
+    
+    const tempPath = `${this.fontBlacklistFilePath}.tmp`;
+    
+    try {
+      // Write to temp file first
+      await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+      
+      // Atomic rename
+      await fs.rename(tempPath, this.fontBlacklistFilePath);
+      
+      console.log(`PersistenceManager: Font blacklist saved successfully (${blacklist.length} entries)`);
+    } catch (error) {
+      console.error('PersistenceManager: Error saving font blacklist:', error);
+      
+      // Clean up temp file if it exists
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      
+      throw error;
+    }
+  }
+
+  private async loadFontBlacklist(): Promise<FontBlacklistData | null> {
+    try {
+      const content = await fs.readFile(this.fontBlacklistFilePath, 'utf-8');
+      const data = JSON.parse(content) as FontBlacklistData;
+      
+      console.log(`PersistenceManager: Font blacklist loaded (${data.blacklist.length} entries)`);
+      return data;
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        console.log('PersistenceManager: No font blacklist file found');
+        return null;
+      }
+      throw error;
+    }
   }
 }
 

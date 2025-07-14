@@ -3,6 +3,8 @@ import Engine from '../../engine/Engine';
 import { PhraseUnit, WordUnit, CharUnit } from '../../types/types';
 import { ProjectFileManager } from '../../services/ProjectFileManager';
 import { calculateCharacterIndices } from '../../utils/characterIndexCalculator';
+import { Button } from '../common';
+import WordSplitEditor from './WordSplitEditor';
 import './LyricsEditor.css';
 
 interface LyricsEditorProps {
@@ -21,6 +23,7 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
   const [editingCell, setEditingCell] = useState<EditableCell | null>(null);
   const [editValue, setEditValue] = useState<string>('');
   const [saveStatus, setSaveStatus] = useState<string>('');
+  const [wordSplitModalPhrase, setWordSplitModalPhrase] = useState<PhraseUnit | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const projectFileManager = useRef<ProjectFileManager>(new ProjectFileManager(engine));
 
@@ -36,7 +39,6 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
 
       // タイムライン更新イベントのリスナー
       const handleTimelineUpdated = (event: CustomEvent) => {
-        console.log('LyricsEditor: timeline-updatedイベント受信', event.detail.lyrics);
         setLyrics(JSON.parse(JSON.stringify(event.detail.lyrics)));
       };
 
@@ -50,7 +52,13 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
   // 編集開始
   const startEdit = (phraseId: string, field: 'phrase' | 'start' | 'end', currentValue: string | number) => {
     setEditingCell({ phraseId, field, value: currentValue });
-    setEditValue(String(currentValue));
+    if (field === 'start' || field === 'end') {
+      // 時間フィールドの場合は秒単位で表示
+      setEditValue(formatTime(currentValue as number));
+    } else {
+      // テキストフィールドの場合はそのまま
+      setEditValue(String(currentValue));
+    }
   };
 
   // 編集確定
@@ -63,15 +71,15 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
           // フレーズテキストの変更 - 文字タイミングを自動調整
           return updatePhraseText(phrase, editValue);
         } else if (editingCell.field === 'start') {
-          // 開始時刻の変更
-          const newStart = parseInt(editValue);
-          if (!isNaN(newStart) && newStart < phrase.end) {
+          // 開始時刻の変更（秒単位からms単位に変換）
+          const newStart = parseTimeFromSeconds(editValue);
+          if (newStart < phrase.end) {
             return adjustPhraseTiming(phrase, newStart, phrase.end);
           }
         } else if (editingCell.field === 'end') {
-          // 終了時刻の変更
-          const newEnd = parseInt(editValue);
-          if (!isNaN(newEnd) && newEnd > phrase.start) {
+          // 終了時刻の変更（秒単位からms単位に変換）
+          const newEnd = parseTimeFromSeconds(editValue);
+          if (newEnd > phrase.start) {
             return adjustPhraseTiming(phrase, phrase.start, newEnd);
           }
         }
@@ -83,21 +91,12 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
     const lyricsWithIndices = calculateCharacterIndices(updatedLyrics);
     
     // Engineに反映
-    console.log('LyricsEditor: 歌詞データを更新します', lyricsWithIndices);
     engine.updateLyricsData(lyricsWithIndices);
-    console.log('LyricsEditor: Engineへの更新完了');
     setEditingCell(null);
   };
 
   // フレーズテキスト更新と文字タイミング自動調整
   const updatePhraseText = (phrase: PhraseUnit, newText: string): PhraseUnit => {
-    console.log('LyricsEditor: updatePhraseText開始', { 
-      phraseId: phrase.id, 
-      oldText: phrase.phrase, 
-      newText,
-      duration: phrase.end - phrase.start
-    });
-    
     const newWords = splitIntoWords(newText);
     const totalDuration = phrase.end - phrase.start;
     
@@ -110,12 +109,6 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
 
     // 文字あたりの時間を計算
     const timePerChar = totalDuration / totalChars;
-    console.log('LyricsEditor: タイミング計算', { 
-      totalChars, 
-      totalDuration, 
-      timePerChar,
-      newWordsCount: newWords.length
-    });
     
     let currentTime = phrase.start;
     let wordIndex = 0;
@@ -154,12 +147,6 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
       phrase: newText,
       words: newWordUnits
     };
-    
-    console.log('LyricsEditor: updatePhraseText完了', {
-      phraseId: phrase.id,
-      wordsCount: newWordUnits.length,
-      totalCharsInWords: newWordUnits.reduce((sum, w) => sum + w.chars.length, 0)
-    });
     
     return updatedPhrase;
   };
@@ -204,7 +191,6 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
 
   // テキストを単語に分割
   const splitIntoWords = (text: string): string[] => {
-    console.log('LyricsEditor: splitIntoWords実行', { input: text });
     
     // 日本語を含むかチェック
     const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
@@ -227,21 +213,14 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
         }
       }
       
-      console.log('LyricsEditor: 日本語分割結果', { 
-        originalText: text,
-        splitParts: parts,
-        filteredWords: words 
-      });
+      // 単語分割ログ削除済み
       
       // 分割できなかった場合は元のテキストをそのまま返す
       return words.length > 0 ? words : [text.trim()];
     } else {
       // 英語等の場合: スペースとカンマ、ピリオドで分割
       const words = text.split(/[\s,.!?]+/).filter(word => word !== '');
-      console.log('LyricsEditor: 英語分割結果', { 
-        originalText: text,
-        words 
-      });
+      // 単語分割ログ削除済み
       return words;
     }
   };
@@ -254,18 +233,59 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
     engine.updateLyricsData(lyricsWithIndices);
   };
 
+  // 上に行を挿入
+  const insertLineAbove = (currentPhraseId: string) => {
+    const currentIndex = lyrics.findIndex(phrase => phrase.id === currentPhraseId);
+    if (currentIndex === -1) return;
+
+    const currentPhrase = lyrics[currentIndex];
+    let newStart: number;
+    let newEnd: number;
+
+    if (currentIndex === 0) {
+      // 先頭の行の場合: 0からcurrentPhraseの開始時刻まで
+      newStart = 0;
+      newEnd = currentPhrase.start;
+    } else {
+      // それ以外: 前の行の終了時刻からcurrentPhraseの開始時刻まで
+      const previousPhrase = lyrics[currentIndex - 1];
+      newStart = previousPhrase.end;
+      newEnd = currentPhrase.start;
+    }
+
+    // 新しいフレーズを作成
+    const newPhrase: PhraseUnit = {
+      id: `phrase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      phrase: '新しい歌詞',
+      start: newStart,
+      end: newEnd,
+      words: []
+    };
+
+    // 新しいフレーズのテキストと文字タイミングを設定
+    const updatedNewPhrase = updatePhraseText(newPhrase, '新しい歌詞');
+
+    // 歌詞配列に挿入
+    const updatedLyrics = [
+      ...lyrics.slice(0, currentIndex),
+      updatedNewPhrase,
+      ...lyrics.slice(currentIndex)
+    ];
+
+    // 文字インデックスを再計算
+    const lyricsWithIndices = calculateCharacterIndices(updatedLyrics);
+    engine.updateLyricsData(lyricsWithIndices);
+  };
+
   // プロジェクトの保存
   const handleSave = async () => {
     setSaveStatus('保存中...');
-    console.log('LyricsEditor: 保存開始 - 現在の歌詞データ', lyrics);
     
     // Engineの現在の歌詞データも確認
     const engineLyrics = engine.getTimelineData().lyrics;
-    console.log('LyricsEditor: Engine内の歌詞データ', engineLyrics);
     
     // 比較してデータが一致しているかチェック
     const isDataSynced = JSON.stringify(lyrics) === JSON.stringify(engineLyrics);
-    console.log('LyricsEditor: UI と Engine のデータ同期状態', { isDataSynced });
     
     try {
       await projectFileManager.current.saveProject('project');
@@ -277,11 +297,39 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
     }
   };
 
-  // 時間フォーマット
+  // 単語分割編集を開始
+  const openWordSplitEditor = (phrase: PhraseUnit) => {
+    setWordSplitModalPhrase(phrase);
+  };
+
+  // 単語分割編集結果を保存
+  const handleWordSplitSave = (updatedPhrase: PhraseUnit) => {
+    const updatedLyrics = lyrics.map(phrase => 
+      phrase.id === updatedPhrase.id ? updatedPhrase : phrase
+    );
+    
+    setLyrics(updatedLyrics);
+    
+    // エンジンに更新を反映
+    engine.updateLyricsData(updatedLyrics, true, '単語分割編集');
+    
+    setWordSplitModalPhrase(null);
+  };
+
+  // 単語分割編集をキャンセル
+  const handleWordSplitClose = () => {
+    setWordSplitModalPhrase(null);
+  };
+
+  // 時間フォーマット（秒単位で表示、1ms精度）
   const formatTime = (ms: number): string => {
-    const seconds = Math.floor(ms / 1000);
-    const milliseconds = ms % 1000;
-    return `${seconds}.${milliseconds.toString().padStart(3, '0')}`;
+    return (ms / 1000).toFixed(3);
+  };
+
+  // 秒をミリ秒に変換
+  const parseTimeFromSeconds = (timeStr: string): number => {
+    const seconds = parseFloat(timeStr);
+    return isNaN(seconds) ? 0 : Math.round(seconds * 1000);
   };
 
   // キーボードイベント処理
@@ -306,25 +354,25 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
       <div className="lyrics-editor-header">
         <h3>歌詞編集</h3>
         <div className="lyrics-editor-controls">
-          <button onClick={handleSave} className="save-button">
+          <Button variant="primary" onClick={handleSave}>
             プロジェクトを保存
-          </button>
+          </Button>
           {saveStatus && <span className="save-status">{saveStatus}</span>}
           {onClose && (
-            <button onClick={() => {
-              console.log('LyricsEditor: 編集終了処理開始');
-              // アニメーション状態を強制更新
-              if (engine && engine.instanceManager) {
-                console.log('LyricsEditor: エンジン状態を更新');
-                engine.arrangeCharsOnStage();
-                engine.instanceManager.loadPhrases(engine.phrases, engine.charPositions);
-                engine.instanceManager.update(engine.currentTime);
-              }
-              onClose();
-              console.log('LyricsEditor: 編集終了処理完了');
-            }} className="close-button">
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                // アニメーション状態を強制更新
+                if (engine && engine.instanceManager) {
+                  engine.arrangeCharsOnStage();
+                  engine.instanceManager.loadPhrases(engine.phrases, engine.charPositions);
+                  engine.instanceManager.update(engine.currentTime);
+                }
+                onClose();
+              }}
+            >
               閉じる
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -397,13 +445,30 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
                   )}
                 </td>
                 <td className="action-cell">
-                  <button 
+                  <Button 
+                    variant="warning"
+                    size="small"
+                    onClick={() => openWordSplitEditor(phrase)}
+                    title="単語分割を編集"
+                  >
+                    単語分割
+                  </Button>
+                  <Button 
+                    variant="success"
+                    size="small"
+                    onClick={() => insertLineAbove(phrase.id)}
+                    title="上に行を挿入"
+                  >
+                    ↑挿入
+                  </Button>
+                  <Button 
+                    variant="danger"
+                    size="small"
                     onClick={() => deletePhrase(phrase.id)}
-                    className="delete-button"
                     title="フレーズを削除"
                   >
                     削除
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
@@ -416,6 +481,19 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
           </div>
         )}
       </div>
+      
+      {/* 単語分割編集モーダル */}
+      {wordSplitModalPhrase && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <WordSplitEditor 
+              phrase={wordSplitModalPhrase}
+              onSave={handleWordSplitSave}
+              onClose={handleWordSplitClose}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

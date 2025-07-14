@@ -1,6 +1,6 @@
 {
-  "appId": "com.visiblyrics.app",
-  "productName": "Visiblyrics",
+  "appId": "com.utavista.app",
+  "productName": "UTAVISTA",
   "directories": {
     "output": "dist-electron"
   },

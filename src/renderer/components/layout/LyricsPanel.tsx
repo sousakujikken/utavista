@@ -111,7 +111,6 @@ const LyricsPanel: React.FC<LyricsPanelProps> = ({ engine, onLyricsEditModeToggl
           // Engineが利用可能な場合、歌詞をロード
           if (engine) {
             engine.loadLyrics(json);
-            console.log('歌詞データをEngineにロードしました:', file.name);
             setError(null); // エラーをクリア
             setSuccessMessage(`歌詞データ "${file.name}" を正常に読み込みました。`);
             

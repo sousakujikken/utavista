@@ -1,0 +1,79 @@
+.font-selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.font-family-selector,
+.font-style-selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.font-selector-label {
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-family: var(--font-primary);
+}
+
+.font-family-select,
+.font-style-select {
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-small);
+  background-color: var(--bg-level-3);
+  font-size: var(--text-body);
+  font-family: var(--font-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: var(--transition-normal);
+}
+
+.font-family-select:focus,
+.font-style-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(240, 5, 157, 0.2);
+}
+
+.font-family-select:disabled,
+.font-style-select:disabled {
+  background-color: var(--bg-level-1);
+  cursor: not-allowed;
+  opacity: 0.7;
+  color: var(--text-disabled);
+}
+
+.font-preview {
+  margin-top: var(--space-xs);
+}
+
+.font-preview-text {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: font-family 0.2s ease;
+  background-color: var(--bg-level-3);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-small);
+  color: var(--text-primary);
+  padding: var(--space-sm);
+}
+
+/* フォントファミリーセレクトのスタイル調整 */
+.font-family-select {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* スタイルセレクトのスタイル調整 */
+.font-style-select {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* CSS変数によるダークテーマ対応完了 - メディアクエリは不要 */

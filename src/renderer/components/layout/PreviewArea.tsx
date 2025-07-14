@@ -15,7 +15,6 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ engine, lyricsEditMode, onClo
   // コンポーネントマウント時にcanvasContainerのDOM要素が準備できたことを確認
   useEffect(() => {
     if (canvasContainerRef.current && engine) {
-      console.log('PreviewArea: canvasContainer DOM要素の準備完了');
       
       // エンジンから初期背景色を取得してPIXIに設定
       if (engine.projectStateManager) {
@@ -47,14 +46,11 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ engine, lyricsEditMode, onClo
   useEffect(() => {
     if (engine) {
       if (lyricsEditMode) {
-        console.log('PreviewArea: 歌詞編集モードに入りました');
         // 歌詞編集モードに入る時は特に何もしない（キャンバスは隠すだけ）
       } else {
-        console.log('PreviewArea: 歌詞編集モードから復帰しました');
         // 歌詞編集モードから復帰時にアニメーションを強制更新
         setTimeout(() => {
           if (engine.instanceManager) {
-            console.log('PreviewArea: アニメーション強制更新実行');
             engine.instanceManager.update(engine.currentTime);
             
             // さらに文字位置も再計算

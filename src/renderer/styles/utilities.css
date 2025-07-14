@@ -1,0 +1,83 @@
+/* Utility Classes - Using CSS Variables consistently */
+
+/* Spacing utilities */
+.u-mt-xxs { margin-top: var(--space-xxs); }
+.u-mt-xs { margin-top: var(--space-xs); }
+.u-mt-sm { margin-top: var(--space-sm); }
+.u-mt-md { margin-top: var(--space-md); }
+.u-mt-lg { margin-top: var(--space-lg); }
+.u-mt-xl { margin-top: var(--space-xl); }
+
+.u-mb-xxs { margin-bottom: var(--space-xxs); }
+.u-mb-xs { margin-bottom: var(--space-xs); }
+.u-mb-sm { margin-bottom: var(--space-sm); }
+.u-mb-md { margin-bottom: var(--space-md); }
+.u-mb-lg { margin-bottom: var(--space-lg); }
+.u-mb-xl { margin-bottom: var(--space-xl); }
+
+.u-p-xxs { padding: var(--space-xxs); }
+.u-p-xs { padding: var(--space-xs); }
+.u-p-sm { padding: var(--space-sm); }
+.u-p-md { padding: var(--space-md); }
+.u-p-lg { padding: var(--space-lg); }
+.u-p-xl { padding: var(--space-xl); }
+
+/* Text utilities */
+.u-text-primary { color: var(--text-primary); }
+.u-text-secondary { color: var(--text-secondary); }
+.u-text-tertiary { color: var(--text-tertiary); }
+.u-text-muted { color: var(--text-muted); }
+.u-text-disabled { color: var(--text-disabled); }
+
+.u-text-tiny { font-size: var(--text-tiny); }
+.u-text-caption { font-size: var(--text-caption); }
+.u-text-small { font-size: var(--text-small); }
+.u-text-body { font-size: var(--text-body); }
+.u-text-subtitle { font-size: var(--text-subtitle); }
+.u-text-title { font-size: var(--text-title); }
+
+/* Background utilities */
+.u-bg-level-0 { background-color: var(--bg-level-0); }
+.u-bg-level-1 { background-color: var(--bg-level-1); }
+.u-bg-level-2 { background-color: var(--bg-level-2); }
+.u-bg-level-3 { background-color: var(--bg-level-3); }
+.u-bg-level-4 { background-color: var(--bg-level-4); }
+.u-bg-level-5 { background-color: var(--bg-level-5); }
+
+/* Border utilities */
+.u-border { border: 1px solid var(--border-standard); }
+.u-border-subtle { border: 1px solid var(--border-subtle); }
+.u-border-prominent { border: 1px solid var(--border-prominent); }
+
+/* Border radius utilities */
+.u-radius-subtle { border-radius: var(--radius-subtle); }
+.u-radius-small { border-radius: var(--radius-small); }
+.u-radius-medium { border-radius: var(--radius-medium); }
+.u-radius-large { border-radius: var(--radius-large); }
+
+/* Display utilities */
+.u-flex { display: flex; }
+.u-flex-column { flex-direction: column; }
+.u-flex-center { align-items: center; justify-content: center; }
+.u-flex-between { justify-content: space-between; }
+.u-flex-end { justify-content: flex-end; }
+.u-gap-xs { gap: var(--space-xs); }
+.u-gap-sm { gap: var(--space-sm); }
+.u-gap-md { gap: var(--space-md); }
+
+/* Width utilities */
+.u-w-full { width: 100%; }
+.u-w-auto { width: auto; }
+
+/* Divider */
+.u-divider {
+  border: none;
+  border-top: 1px solid var(--border-standard);
+  margin: var(--space-lg) 0;
+}
+
+/* Status colors */
+.u-status-success { color: var(--color-success); }
+.u-status-error { color: var(--color-danger); }
+.u-status-warning { color: var(--color-warning); }
+.u-status-info { color: var(--color-info); }

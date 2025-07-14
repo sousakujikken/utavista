@@ -1,0 +1,162 @@
+/* ProjectTab specific styles using CSS variables */
+
+.project-tab {
+  padding: var(--space-md);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.project-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.project-info {
+  margin-top: var(--space-md);
+}
+
+.info-item {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.info-item .label {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.info-item .value {
+  color: var(--text-primary);
+}
+
+.status-container {
+  height: 50px;
+  margin-top: var(--space-sm);
+}
+
+.loading {
+  color: var(--text-muted);
+  padding: var(--space-sm);
+}
+
+/* Export settings */
+.export-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.setting-group label {
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+  font-weight: 500;
+}
+
+.time-range-settings {
+  margin-top: var(--space-md);
+}
+
+.time-input-container {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+/* Resolution display */
+.resolution-display {
+  background-color: var(--bg-level-5);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-small);
+  border: 1px solid var(--border-standard);
+  margin-top: var(--space-md);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.resolution-display .resolution-value {
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+/* Export progress */
+.export-progress {
+  margin-top: var(--space-lg);
+}
+
+.progress-container {
+  position: relative;
+  background-color: var(--bg-level-3);
+  border-radius: var(--radius-small);
+  height: 20px;
+  overflow: hidden;
+  margin-bottom: var(--space-sm);
+}
+
+.progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: var(--color-accent);
+  transition: width var(--transition-normal);
+}
+
+.progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--text-primary);
+  font-size: var(--text-small);
+  font-weight: 500;
+  z-index: 1;
+}
+
+.export-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+/* Test section */
+.test-section {
+  margin-top: var(--space-xl);
+  padding-top: var(--space-xl);
+  border-top: 1px solid var(--border-standard);
+}
+
+.test-controls {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.test-log {
+  background-color: var(--bg-level-2);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-small);
+  padding: var(--space-sm);
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+}
+
+.test-log pre {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--text-tertiary);
+}

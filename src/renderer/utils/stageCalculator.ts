@@ -1,7 +1,7 @@
 import { AspectRatio, Orientation, StageSize } from '../types/types';
 
-// コンテナサイズ（固定）
-export const CONTAINER_SIZE = 640;
+// デフォルトコンテナサイズ（フォールバック用）
+export const DEFAULT_CONTAINER_SIZE = 640;
 
 // 基準解像度の定義
 export const BASE_RESOLUTIONS: Record<AspectRatio, { width: number; height: number }> = {
@@ -9,6 +9,21 @@ export const BASE_RESOLUTIONS: Record<AspectRatio, { width: number; height: numb
   '4:3': { width: 1600, height: 1200 },
   '1:1': { width: 1080, height: 1080 }
 };
+
+/**
+ * 利用可能なコンテナサイズを取得
+ */
+function getAvailableContainerSize(): { width: number; height: number } {
+  const canvasContainer = document.getElementById('canvasContainer');
+  if (canvasContainer) {
+    const rect = canvasContainer.getBoundingClientRect();
+    return {
+      width: rect.width || DEFAULT_CONTAINER_SIZE,
+      height: rect.height || DEFAULT_CONTAINER_SIZE
+    };
+  }
+  return { width: DEFAULT_CONTAINER_SIZE, height: DEFAULT_CONTAINER_SIZE };
+}
 
 /**
  * アスペクト比と向きからステージサイズを計算
@@ -26,10 +41,29 @@ export function calculateStageSize(
     [width, height] = [height, width];
   }
   
-  // コンテナにフィットするスケールを計算
+  // 利用可能なコンテナサイズを取得
+  const containerSize = getAvailableContainerSize();
+  
+  // アスペクト比を考慮して表示領域にフィットするスケールを計算
+  const aspectRatioValue = width / height;
+  const containerAspectRatio = containerSize.width / containerSize.height;
+  
+  let targetWidth: number, targetHeight: number;
+  
+  if (aspectRatioValue > containerAspectRatio) {
+    // コンテンツがコンテナより横長の場合、幅を基準にスケーリング
+    targetWidth = containerSize.width;
+    targetHeight = containerSize.width / aspectRatioValue;
+  } else {
+    // コンテンツがコンテナより縦長の場合、高さを基準にスケーリング
+    targetHeight = containerSize.height;
+    targetWidth = containerSize.height * aspectRatioValue;
+  }
+  
+  // スケールを計算
   const scale = Math.min(
-    CONTAINER_SIZE / width,
-    CONTAINER_SIZE / height
+    targetWidth / width,
+    targetHeight / height
   );
   
   return { width, height, scale };

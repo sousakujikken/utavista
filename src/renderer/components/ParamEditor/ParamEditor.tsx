@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import './ParamEditor.css';
+import { useRecentColors } from '../../hooks/useRecentColors';
+import FontSelector from './FontSelector';
 
 // パラメータ設定の型定義
 export interface ParamConfig {
   name: string;
-  type: 'number' | 'string' | 'color' | 'boolean';
+  type: 'number' | 'string' | 'color' | 'boolean' | 'font';
   default: any;
   min?: number;
   max?: number;
@@ -31,6 +33,9 @@ const ParamEditor: React.FC<ParamEditorProps> = ({
   // 現在の値を内部状態として管理
   const [values, setValues] = useState<Record<string, any>>({});
   
+  // 最近使用した色の管理
+  const { recentColors, addRecentColor } = useRecentColors();
+  
   // パラメータが変更されたら内部状態を更新
   useEffect(() => {
     const initialValues: Record<string, any> = {};
@@ -53,6 +58,13 @@ const ParamEditor: React.FC<ParamEditorProps> = ({
     
     // 親コンポーネントに変更を通知
     onChange(updatedValues);
+  };
+  
+  // 色の最終確定時のハンドラ（フォーカス離脱時）
+  const handleColorBlur = (name: string, value: string) => {
+    if (typeof value === 'string' && value.startsWith('#')) {
+      addRecentColor(value);
+    }
   };
   
   // リセットボタンのハンドラ
@@ -146,20 +158,44 @@ const ParamEditor: React.FC<ParamEditorProps> = ({
               )}
               
               {param.type === 'color' && (
-                <div className="color-picker">
-                  <input
-                    type="color"
-                    value={values[param.name] || '#FFFFFF'}
-                    onChange={(e) => handleChange(param.name, e.target.value)}
-                    disabled={disabled}
-                  />
-                  <input
-                    type="text"
-                    value={values[param.name] || '#FFFFFF'}
-                    onChange={(e) => handleChange(param.name, e.target.value)}
-                    className="color-input"
-                    disabled={disabled}
-                  />
+                <div className="color-picker-container">
+                  <div className="color-picker">
+                    <input
+                      type="color"
+                      value={values[param.name] || '#FFFFFF'}
+                      onChange={(e) => handleChange(param.name, e.target.value)}
+                      onBlur={(e) => handleColorBlur(param.name, e.target.value)}
+                      disabled={disabled}
+                    />
+                    <input
+                      type="text"
+                      value={values[param.name] || '#FFFFFF'}
+                      onChange={(e) => handleChange(param.name, e.target.value)}
+                      onBlur={(e) => handleColorBlur(param.name, e.target.value)}
+                      className="color-input"
+                      disabled={disabled}
+                    />
+                  </div>
+                  {recentColors.length > 0 && (
+                    <div className="recent-colors">
+                      <div className="recent-colors-label">最近使用した色:</div>
+                      <div className="recent-colors-grid">
+                        {recentColors.map((color, index) => (
+                          <button
+                            key={`${color}-${index}`}
+                            className="recent-color-button"
+                            style={{ backgroundColor: color }}
+                            onClick={() => {
+                              handleChange(param.name, color);
+                              handleColorBlur(param.name, color);
+                            }}
+                            disabled={disabled}
+                            title={color}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               
@@ -173,6 +209,14 @@ const ParamEditor: React.FC<ParamEditorProps> = ({
                   />
                   <span className="toggle-slider"></span>
                 </label>
+              )}
+              
+              {param.type === 'font' && (
+                <FontSelector
+                  value={values[param.name] || ''}
+                  onChange={(fontFamily) => handleChange(param.name, fontFamily)}
+                  disabled={disabled}
+                />
               )}
             </div>
           </div>

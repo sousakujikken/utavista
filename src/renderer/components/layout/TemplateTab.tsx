@@ -37,7 +37,8 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     selectedWordTemplateId: 'fadeslidetext', 
     selectedCharTemplateId: 'fadeslidetext',
     globalParams: {} as Record<string, any>,
-    hasParamsChanged: false
+    hasParamsChanged: false,
+    useIndividualSettings: false // 個別設定使用フラグ
   });
 
   // 状態更新ヘルパー関数
@@ -63,9 +64,10 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       memoizedOnTemplateChange(currentTemplateId);
     }
     
-    // 現在のグローバルパラメータを読み込んで表示
+    // 現在のグローバルパラメータを読み込んで表示（V2専用）
     if (engine.parameterManager) {
-      const currentParams = engine.parameterManager.getGlobalParams();
+      // V2モード: グローバルデフォルトを取得
+      const currentParams = engine.parameterManager.getGlobalDefaults();
       
       // パラメータが実際に変更された場合のみ更新
       const paramsChanged = JSON.stringify(currentParams) !== JSON.stringify(prevParamsRef.current);
@@ -86,7 +88,6 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
   useEffect(() => {
     // タブ切り替えを検知するためのカスタムイベントリスナー
     const handleTabFocus = () => {
-      console.log('TemplateTab: タブフォーカス検知、エンジン状態を同期');
       syncWithEngineState();
     };
     
@@ -95,10 +96,28 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     
     // プロジェクトロード時にも同期
     const handleProjectLoaded = () => {
-      console.log('TemplateTab: プロジェクトロード検知、エンジン状態を同期');
       // 少し遅延を入れてエンジンの状態が完全に更新されるのを待つ
       setTimeout(() => {
         syncWithEngineState();
+        
+        // 個別設定状態の同期を追加（V2対応）
+        if (engine && selectedObjectIds.length > 0) {
+          let hasIndividualSettings = false;
+          
+          if (engine.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+            // V2モード: 個別設定が有効かチェック
+            hasIndividualSettings = selectedObjectIds.some(id =>
+              engine.parameterManagerV2.isIndividualSettingEnabled(id)
+            );
+          } else {
+            // V1モード: 従来の方法（現在はV2のみのため使用されない）
+            hasIndividualSettings = selectedObjectIds.some(id =>
+              engine.parameterManager?.isIndividualSettingEnabled?.(id) || false
+            );
+          }
+          
+          updateState({ useIndividualSettings: hasIndividualSettings });
+        }
       }, 100);
     };
     window.addEventListener('project-loaded', handleProjectLoaded);
@@ -140,6 +159,28 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     if (commonTemplateId && !hasDifferentTemplates) {
       updateSelectedTemplateId(selectedObjectType, commonTemplateId);
     }
+    
+    // 選択されたオブジェクトの個別設定状態をチェック（V2対応）
+    if (engine && selectedObjectIds.length > 0) {
+      let hasIndividualSettings = false;
+      
+      if (engine.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+        // V2モード: 個別設定が有効かチェック
+        hasIndividualSettings = selectedObjectIds.some(id =>
+          engine.parameterManagerV2.isIndividualSettingEnabled(id)
+        );
+      } else {
+        // V1モード: 従来の方法（現在はV2のみのため使用されない）
+        hasIndividualSettings = selectedObjectIds.some(id =>
+          engine.parameterManager?.isIndividualSettingEnabled?.(id) || false
+        );
+      }
+      
+      // UI状態を実際の状態に同期
+      if (hasIndividualSettings !== state.useIndividualSettings) {
+        updateState({ useIndividualSettings: hasIndividualSettings });
+      }
+    }
   }, [selectedObjectIds, selectedObjectType, engine, updateState]);
   
   // TemplateManagerのセットアップ
@@ -148,12 +189,13 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       // すべてのテンプレートをEngineのTemplateManagerに登録
       registerAllTemplates();
       
-      // グローバルパラメータを取得
-      if (engine.parameterManager) {
-        updateState({ globalParams: engine.parameterManager.getGlobalParams() });
+      // 初回マウント時のみグローバルパラメータを取得
+      // （既存のパラメータを上書きしないため）
+      if (engine.parameterManager && Object.keys(state.globalParams).length === 0) {
+        updateState({ globalParams: engine.parameterManager.getGlobalDefaults() });
       }
     }
-  }, [engine, template]);
+  }, [engine]); // templateの変更では再実行しない
   
   // プロジェクト読み込み時のテンプレート更新を受け取る
   useEffect(() => {
@@ -173,7 +215,6 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     
     // プロジェクトロード完了イベントを受け取ってUI初期化を実行
     const handleProjectLoaded = () => {
-      console.log('TemplateTab: プロジェクトロード完了イベントを受信');
       
       // 少し遅延を入れてからUI初期化（エンジンの状態が完全に更新されるのを待つ）
       setTimeout(() => {
@@ -187,7 +228,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
         
         // グローバルパラメータの取得と反映
         if (engine.parameterManager) {
-          const globalParams = engine.parameterManager.getGlobalParams();
+          const globalParams = engine.parameterManager.getGlobalDefaults();
           updateState({ globalParams });
         }
       }, 100);
@@ -206,9 +247,17 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
   const registerAllTemplates = () => {
     if (!engine) return;
     
+    const templateManager = engine.getTemplateManager();
+    if (!templateManager) return;
+    
     // まずエンジンのTemplateManagerに登録されているか確認して、
     // 登録されていないテンプレートを追加する
     templateList.forEach(template => {
+      // 既に登録されているテンプレートはスキップ
+      if (templateManager.isTemplateRegistered(template.id)) {
+        return;
+      }
+      
       const templateObj = getTemplateById(template.id);
       if (templateObj) {
         try {
@@ -228,7 +277,6 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
             { name: template.name },
             params
           );
-          console.log(`テンプレート「${template.name}」(${template.id})をEngineに登録しました`);
         } catch (error) {
           console.error(`テンプレート「${template.name}」(${template.id})の登録に失敗しました:`, error);
         }
@@ -241,17 +289,65 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     // 従来の単一選択イベント（後方互換性のため）
     const handleSingleObjectSelected = (event: CustomEvent) => {
       const { objectId, objectType, params } = event.detail;
-      console.log('TemplateTab: 単一オブジェクト選択イベント受信 –', event.detail);
-      
-      // エディターモードを選択オブジェクトモードに切り替え
-      updateState({ 
-        editorMode: 'selection',
-        hasParamsChanged: false
-      });
       
       setSelectedObjectIds([objectId]);
       setSelectedObjectType(objectType);
-      setObjectParams(params || {});
+      
+      // 個別設定の状態を確認（V2対応）
+      let hasIndividualSettings = false;
+      
+      if (engine?.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+        // V2モード: 個別設定が有効かチェック
+        hasIndividualSettings = engine.parameterManagerV2.isIndividualSettingEnabled(objectId);
+      } else {
+        // V1モード: 従来の方法（現在はV2のみのため使用されない）
+        hasIndividualSettings = engine?.parameterManager?.isIndividualSettingEnabled?.(objectId) || false;
+      }
+      
+      // フレーズオブジェクトの場合、個別設定の有無に基づいてモードを決定
+      if (objectType === 'phrase') {
+        // 個別設定がアクティブな場合は個別設定モード、そうでなければグローバルモード
+        const newEditorMode = hasIndividualSettings ? 'selection' : 'global';
+        updateState({ 
+          editorMode: newEditorMode,
+          hasParamsChanged: false,
+          useIndividualSettings: hasIndividualSettings
+        });
+      } else {
+        // フレーズ以外のオブジェクトの場合、現在のモードを維持
+        // ただし、個別設定は無効化（フレーズ以外は個別設定をサポートしない）
+        updateState({ 
+          hasParamsChanged: false,
+          useIndividualSettings: false
+        });
+      }
+      
+      // 表示するパラメータを決定
+      let displayParams = params || {};
+      
+      // エンジンが初期化済みの場合は常にグローバルパラメータを基準に開始
+      if (engine && engine.parameterManager) {
+        try {
+          // まずグローバルパラメータを取得（個別設定の有無に関わらず）
+          const globalParams = engine.parameterManager.getGlobalDefaults();
+          if (globalParams && Object.keys(globalParams).length > 0) {
+            displayParams = globalParams;
+          }
+          
+          // V2では個別設定の概念がないため、この処理をスキップ
+          if (hasIndividualSettings) {
+            // V2専用: フレーズパラメータを取得
+            const objectParams = engine.parameterManager.getParameters(objectId);
+            
+            if (objectParams && Object.keys(objectParams).length > 0) {
+              displayParams = objectParams;
+            }
+          }
+        } catch (error) {
+          console.warn('TemplateTab: パラメータの取得に失敗、歌詞データのparamsを使用:', error);
+        }
+      }
+      setObjectParams(displayParams);
       
       // テンプレートマップをクリア（単一選択なので）
       const templateMap = new Map<string, string>();
@@ -277,19 +373,83 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     // 新しい複数選択イベント
     const handleMultipleObjectsSelected = (event: CustomEvent) => {
       const { objectIds, objectType, params } = event.detail;
-      console.log('TemplateTab: 複数オブジェクト選択イベント受信 –', event.detail);
-      
-      // エディターモードを選択オブジェクトモードに切り替え
-      updateState({ 
-        editorMode: 'selection',
-        hasParamsChanged: false
-      });
       
       setSelectedObjectIds(objectIds || []);
       setSelectedObjectType(objectType);
       
-      // 複数選択時は共通パラメータのみ（または空オブジェクト）
-      setObjectParams(params || {});
+      // 個別設定の状態を確認（V2対応）
+      let hasAnyIndividualSettings = false;
+      let allHaveIndividualSettings = false;
+      
+      if (engine?.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+        // V2モード: 個別設定が有効かチェック
+        hasAnyIndividualSettings = objectIds.some(id =>
+          engine.parameterManagerV2.isIndividualSettingEnabled(id)
+        );
+        allHaveIndividualSettings = objectIds.length > 0 && objectIds.every(id => 
+          engine.parameterManagerV2.isIndividualSettingEnabled(id)
+        );
+      } else {
+        // V1モード: 従来の方法（現在はV2のみのため使用されない）
+        hasAnyIndividualSettings = objectIds.some(id =>
+          engine?.parameterManager?.isIndividualSettingEnabled?.(id) || false
+        );
+        allHaveIndividualSettings = objectIds.length > 0 && objectIds.every(id => 
+          engine?.parameterManager?.isIndividualSettingEnabled?.(id) || false
+        );
+      }
+      
+      // フレーズオブジェクトの場合、個別設定の有無に基づいてモードを決定
+      if (objectType === 'phrase') {
+        // 一つでも個別設定がアクティブな場合は個別設定モード、全て非アクティブならグローバルモード
+        const newEditorMode = hasAnyIndividualSettings ? 'selection' : 'global';
+        updateState({ 
+          editorMode: newEditorMode,
+          hasParamsChanged: false,
+          useIndividualSettings: hasAnyIndividualSettings
+        });
+      } else {
+        // フレーズ以外のオブジェクトの場合、現在のモードを維持
+        // ただし、個別設定は無効化（フレーズ以外は個別設定をサポートしない）
+        updateState({ 
+          hasParamsChanged: false,
+          useIndividualSettings: false
+        });
+      }
+      
+      // 表示するパラメータを決定
+      let displayParams = params || {};
+      
+      // エンジンが初期化済みの場合は常にグローバルパラメータを基準に開始
+      if (engine && engine.parameterManager) {
+        try {
+          // まずグローバルパラメータを取得（個別設定の有無に関わらず）
+          const globalParams = engine.parameterManager.getGlobalDefaults();
+          if (globalParams && Object.keys(globalParams).length > 0) {
+            displayParams = globalParams;
+          }
+          
+          // 全てが個別設定を持つ場合のみ、個別パラメータで上書き（V2対応）
+          if (allHaveIndividualSettings && objectIds.length > 0) {
+            let firstObjectParams;
+            
+            if (engine.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+              // V2モード: フレーズパラメータを取得
+              firstObjectParams = engine.parameterManagerV2.getParameters(objectIds[0]);
+            } else {
+              // V1モード: 従来の方法
+              firstObjectParams = engine.parameterManager.getParameters(objectIds[0]);
+            }
+            
+            if (firstObjectParams && Object.keys(firstObjectParams).length > 0) {
+              displayParams = firstObjectParams;
+            }
+          }
+        } catch (error) {
+          console.warn('TemplateTab: 複数選択でのパラメータ取得に失敗:', error);
+        }
+      }
+      setObjectParams(displayParams);
       
       // 選択されたオブジェクトのテンプレートIDを取得
       const templateMap = new Map<string, string>();
@@ -370,7 +530,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
           
           // 既存のパラメータを優先し、不足分をデフォルト値で補完
           const existingParams = engine.parameterManager
-            ? engine.parameterManager.getGlobalParams()
+            ? engine.parameterManager.getGlobalDefaults()
             : {};
           
           // 既存のパラメータを保持し、新しいパラメータのみデフォルト値を設定
@@ -417,7 +577,6 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
         { name: templateName },
         params
       );
-      console.log(`テンプレート「${templateName}」(${templateId})をEngineに登録しました`);
       
       // 現在のテンプレートと同じかチェック（強制再適用の判定のため）
       const currentTemplateId = selectedObjectIds.length === 1 
@@ -426,7 +585,6 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       const isSameTemplate = currentTemplateId === templateId;
       const forceReapply = isSameTemplate || state.hasParamsChanged;
       
-      console.log(`テンプレート適用: forceReapply=${forceReapply}, isSameTemplate=${isSameTemplate}, hasParamsChanged=${state.hasParamsChanged}`);
       
       // 複数のオブジェクトに対してテンプレートを一括適用
       if (selectedObjectIds.length === 1) {
@@ -435,14 +593,22 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
         if (!success) {
           console.error(`オブジェクト ${selectedObjectIds[0]} のテンプレート適用に失敗しました`);
         } else {
-          console.log(`オブジェクト ${selectedObjectIds[0]} にテンプレート「${templateName}」(${templateId})を適用しました`);
           
           // パラメータ変更フラグをリセット
           updateState({ hasParamsChanged: false });
           
-          // 選択オブジェクトパラメータを更新
+          // 選択オブジェクトパラメータを更新（V2対応）
           if (engine.parameterManager) {
-            const updatedParams = engine.parameterManager.getObjectParams(selectedObjectIds[0]);
+            let updatedParams;
+            
+            if (engine.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+              // V2モード: フレーズパラメータを取得
+              updatedParams = engine.parameterManagerV2.getParameters(selectedObjectIds[0]);
+            } else {
+              // V1モード: 従来の方法
+              updatedParams = engine.parameterManager.getParameters(selectedObjectIds[0]);
+            }
+            
             setObjectParams(updatedParams);
           }
           
@@ -470,7 +636,6 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
         }
         
         if (allSuccess) {
-          console.log(`選択された ${selectedObjectIds.length} 個の${selectedObjectType}にテンプレート「${templateName}」(${templateId})を適用しました`);
           
           // パラメータ変更フラグをリセット
           updateState({ hasParamsChanged: false });
@@ -519,24 +684,60 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     }
   }, [state.editorMode, state.selectedPhraseTemplateId, state.selectedWordTemplateId, state.selectedCharTemplateId, selectedTemplate, selectedObjectType]);
 
-  // グローバルパラメータ変更ハンドラ（統合版）
+  // グローバルパラメータ変更ハンドラ（統合版・V2対応）
   const handleGlobalParamChange = useCallback((updatedParams: Record<string, any>) => {
     if (!engine) return;
     
-    // エンジンに更新を反映し、状態を更新
-    engine.updateGlobalParams(updatedParams);
-    updateState({ globalParams: updatedParams });
+    
+    // 深いコピーを作成して参照問題を防ぐ
+    const paramsCopy = JSON.parse(JSON.stringify(updatedParams));
+    
+    // V2対応のラッパーメソッドを使用
+    if (engine.updateGlobalParameters) {
+      engine.updateGlobalParameters(paramsCopy);
+    } else {
+      // フォールバック: V1メソッド
+      engine.updateGlobalParams(paramsCopy);
+    }
+    
+    // リアルタイム反映のため強制レンダリング
+    if (engine.instanceManager) {
+      engine.instanceManager.updateExistingInstances();
+      if (engine.currentTime !== undefined) {
+        engine.instanceManager.update(engine.currentTime);
+      }
+    }
+    
+    updateState({ globalParams: paramsCopy });
   }, [engine, updateState]);
   
-  // オブジェクトパラメータ変更ハンドラ（統合版）
+  // オブジェクトパラメータ変更ハンドラ（統合版・V2対応）
   const handleObjectParamChange = useCallback((updatedParams: Record<string, any>) => {
     if (!engine || selectedObjectIds.length === 0) return;
     
-    // パラメータを更新
+    // 深いコピーを作成して参照問題を防ぐ
+    const paramsCopy = JSON.parse(JSON.stringify(updatedParams));
+    
+    // パラメータを更新（V2対応）
     selectedObjectIds.forEach(id => {
-      engine.updateObjectParams(id, selectedObjectType as any, updatedParams);
+      
+      if (engine.updatePhraseParameters && selectedObjectType === 'phrase') {
+        // V2パラメータ更新（フレーズレベル）
+        engine.updatePhraseParameters(id, paramsCopy);
+      } else {
+        // フレーズ以外は現状V2で未対応のため、ログ出力のみ
+        console.warn(`[TemplateTab] ${selectedObjectType}レベルの個別パラメータ更新はV2では未対応: ${id}`);
+      }
     });
-    setObjectParams(updatedParams);
+    setObjectParams(paramsCopy);
+    
+    // リアルタイム反映のため強制レンダリング
+    if (engine.instanceManager) {
+      engine.instanceManager.updateExistingInstances();
+      if (engine.currentTime !== undefined) {
+        engine.instanceManager.update(engine.currentTime);
+      }
+    }
     
     // assignTemplateの呼び出しを削除
     // （updateObjectParams内で既にインスタンス更新が行われているため）
@@ -545,20 +746,26 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
   // フォント更新のためのリロード状態
   const [fontReloadTrigger, setFontReloadTrigger] = useState(0);
   
-  // 選択中のオブジェクトの個別パラメータをクリア
+  // 選択中のオブジェクトの個別パラメータをクリア（フレーズレベル統一）
   const handleClearSelectedObjectParams = useCallback(() => {
     if (!engine || selectedObjectIds.length === 0) return;
     
-    const confirmMessage = selectedObjectIds.length === 1
-      ? `${selectedObjectIds[0]} の個別設定をクリアしますか？`
-      : `選択された ${selectedObjectIds.length}個の${selectedObjectType} の個別設定をクリアしますか？`;
+    // フレーズIDを抽出して重複を除去
+    const phraseIds = new Set<string>();
+    selectedObjectIds.forEach(id => {
+      const phraseId = engine.parameterManager?.extractPhraseId?.(id) || id;
+      phraseIds.add(phraseId);
+    });
+    
+    const confirmMessage = phraseIds.size === 1
+      ? `フレーズ ${Array.from(phraseIds)[0]} の個別設定をクリアしますか？`
+      : `選択された ${phraseIds.size}個のフレーズの個別設定をクリアしますか？`;
     
     if (window.confirm(confirmMessage)) {
-      // エンジンで個別パラメータをクリア
-      const success = engine.clearSelectedObjectParams(selectedObjectIds);
+      // エンジンでフレーズレベルの個別パラメータをクリア
+      const success = engine.clearSelectedObjectParams(Array.from(phraseIds));
       
       if (success) {
-        console.log(`TemplateTab: ${selectedObjectIds.length}個のオブジェクトの個別パラメータをクリアしました`);
         
         // パラメータ表示をクリア
         setObjectParams({});
@@ -576,11 +783,124 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       }
     }
   }, [engine, selectedObjectIds, selectedObjectType]);
+
+  // オブジェクトの個別設定を有効化（フレーズレベル統一）
+  const handleEnableIndividualSettings = useCallback(() => {
+    if (!engine || selectedObjectIds.length === 0) return;
+    
+    // フレーズIDを抽出して重複を除去
+    const phraseIds = new Set<string>();
+    selectedObjectIds.forEach(id => {
+      const phraseId = engine.parameterManager?.extractPhraseId?.(id) || id;
+      phraseIds.add(phraseId);
+    });
+    
+    phraseIds.forEach(phraseId => {
+      // V2統一管理でフレーズレベルの個別設定を有効化
+      engine.parameterManager?.enableIndividualSetting?.(phraseId);
+    });
+    
+    
+    // タイムラインマーカーの色変更をトリガー（フレーズIDで通知）
+    const event = new CustomEvent('individual-settings-enabled', {
+      detail: {
+        objectIds: Array.from(phraseIds),
+        objectType: 'phrase'
+      }
+    });
+    window.dispatchEvent(event);
+  }, [engine, selectedObjectIds, selectedObjectType]);
+
+  // オブジェクトの個別設定を無効化
+  const handleDisableIndividualSettings = useCallback(() => {
+    if (!engine || selectedObjectIds.length === 0) return;
+    
+    const confirmMessage = selectedObjectIds.length === 1
+      ? `${selectedObjectIds[0]} の個別設定を無効化しますか？（個別設定はクリアされます）`
+      : `選択された ${selectedObjectIds.length}個の${selectedObjectType} の個別設定を無効化しますか？（個別設定はクリアされます）`;
+    
+    if (window.confirm(confirmMessage)) {
+      // フレーズIDを抽出して重複を除去
+      const phraseIds = new Set<string>();
+      selectedObjectIds.forEach(id => {
+        const phraseId = engine.parameterManager?.extractPhraseId?.(id) || id;
+        phraseIds.add(phraseId);
+      });
+      
+      phraseIds.forEach(phraseId => {
+        // V2統一管理でフレーズレベルの個別設定を無効化
+        engine.parameterManager?.disableIndividualSetting?.(phraseId);
+      });
+      
+      
+      // パラメータ表示をクリア
+      setObjectParams({});
+      
+      // タイムラインマーカーの色変更をトリガー（フレーズIDで通知）
+      const event = new CustomEvent('individual-settings-disabled', {
+        detail: {
+          objectIds: Array.from(phraseIds),
+          objectType: 'phrase'
+        }
+      });
+      window.dispatchEvent(event);
+    }
+  }, [engine, selectedObjectIds, selectedObjectType]);
+
+  // 選択されたオブジェクトの個別設定状態を取得（V2対応）
+  const getIndividualSettingsStatus = useCallback(() => {
+    if (!engine || selectedObjectIds.length === 0) return { allEnabled: false, someEnabled: false };
+    
+    let enabledCount = 0;
+    
+    if (engine.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+      // V2モード: 個別設定が有効かチェック
+      enabledCount = selectedObjectIds.filter(id => 
+        engine.parameterManagerV2.isIndividualSettingEnabled(id)
+      ).length;
+    } else {
+      // V1モード: 従来の方法（現在はV2のみのため使用されない）
+      enabledCount = selectedObjectIds.filter(id => 
+        engine.parameterManager?.isIndividualSettingEnabled?.(id) || false
+      ).length;
+    }
+    
+    return {
+      allEnabled: enabledCount === selectedObjectIds.length,
+      someEnabled: enabledCount > 0
+    };
+  }, [engine, selectedObjectIds]);
+
+  const individualSettingsStatus = getIndividualSettingsStatus();
+
+  // 全ての個別オブジェクトデータを強制クリア
+  const handleForceCleanAllObjectData = useCallback(() => {
+    if (!engine) return;
+    
+    const confirmMessage = '警告: 全ての個別オブジェクトパラメータとアクティベーション状態を完全にクリアします。\n\nこの操作により、過去に設定された全ての個別設定（フレーズ、単語、文字レベル）が削除され、グローバル設定のみが適用されるようになります。\n\nこの操作は元に戻せません。続行しますか？';
+    
+    if (window.confirm(confirmMessage)) {
+      const success = engine.forceCleanAllObjectData();
+      
+      if (success) {
+        
+        // 選択オブジェクトのパラメータ表示もクリア
+        setObjectParams({});
+        
+        // エンジン状態を同期
+        syncWithEngineState();
+        
+        alert('全ての個別オブジェクト設定をクリアしました。\n\nタイムライン上の緑色マーカーが全て消え、グローバル設定のみが適用されています。');
+      } else {
+        console.error('個別オブジェクトデータのクリアに失敗しました');
+        alert('エラー: 個別オブジェクトデータのクリアに失敗しました。');
+      }
+    }
+  }, [engine, syncWithEngineState]);
   
   // fontsLoadedイベントリスナーの設定
   useEffect(() => {
     const handleFontsLoaded = () => {
-      console.log('TemplateTab: fontsLoadedイベントを受信しました');
       setFontReloadTrigger(prev => prev + 1);
     };
     
@@ -590,6 +910,104 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       window.removeEventListener('fontsLoaded', handleFontsLoaded);
     };
   }, []);
+  
+  // 個別設定スイッチの切り替えハンドラ
+  const handleIndividualSettingToggle = useCallback((enabled: boolean) => {
+    if (!engine || selectedObjectIds.length === 0) return;
+    
+    // フレーズオブジェクトの場合、editorModeも同時に更新
+    if (selectedObjectType === 'phrase') {
+      updateState({ 
+        useIndividualSettings: enabled,
+        editorMode: enabled ? 'selection' : 'global'
+      });
+    } else {
+      updateState({ useIndividualSettings: enabled });
+    }
+    
+    if (enabled) {
+      // 個別設定を有効化：フレーズレベルで統一管理
+      const phraseIds = new Set<string>();
+      selectedObjectIds.forEach(objectId => {
+        // オブジェクトIDからフレーズIDを抽出
+        const phraseId = engine.parameterManager?.extractPhraseId?.(objectId) || objectId;
+        phraseIds.add(phraseId);
+      });
+      
+      phraseIds.forEach(phraseId => {
+        // ParameterManagerでフレーズレベルの個別設定を有効化（V2統一管理）
+        engine.parameterManager?.enableIndividualSetting?.(phraseId);
+        
+        // 初期化されたパラメータを取得してUI表示を更新（V2対応）
+        let initializedParams;
+        
+        // V2専用: フレーズパラメータの初期化と取得
+        if (!engine.parameterManager.isPhraseInitialized(objectId)) {
+          const currentTemplateId = getCurrentTemplateId();
+          engine.parameterManager.initializePhrase(objectId, currentTemplateId);
+        }
+        initializedParams = engine.parameterManager.getParameters(objectId);
+        
+        if (initializedParams) {
+          setObjectParams(initializedParams);
+        }
+      });
+      
+      // タイムラインマーカーの色変更をトリガー（フレーズIDで通知）
+      const event = new CustomEvent('individual-settings-enabled', {
+        detail: {
+          objectIds: Array.from(phraseIds),
+          objectType: 'phrase'
+        }
+      });
+      window.dispatchEvent(event);
+      
+    } else {
+      // 個別設定を無効化：フレーズレベルで統一管理
+      const phraseIds = new Set<string>();
+      selectedObjectIds.forEach(objectId => {
+        // オブジェクトIDからフレーズIDを抽出
+        const phraseId = engine.parameterManager?.extractPhraseId?.(objectId) || objectId;
+        phraseIds.add(phraseId);
+      });
+      
+      phraseIds.forEach(phraseId => {
+        engine.parameterManager?.disableIndividualSetting?.(phraseId);
+      });
+      
+      // タイムラインマーカーの色変更をトリガー（フレーズIDで通知）
+      const event = new CustomEvent('individual-settings-disabled', {
+        detail: {
+          objectIds: Array.from(phraseIds),
+          objectType: 'phrase'
+        }
+      });
+      window.dispatchEvent(event);
+    }
+  }, [engine, selectedObjectIds, selectedObjectType, getCurrentTemplateId, updateState]);
+  
+  // 個別設定の現在の状態を取得
+  const getIndividualSettingCurrentStatus = useCallback(() => {
+    if (!engine || selectedObjectIds.length === 0) return false;
+    
+    // 選択されたオブジェクトのうち、個別設定が有効になっているものの数を確認（V2対応）
+    let enabledCount = 0;
+    
+    if (engine.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+      // V2モード: 個別設定が有効かチェック
+      enabledCount = selectedObjectIds.filter(id => 
+        engine.parameterManagerV2.isIndividualSettingEnabled(id)
+      ).length;
+    } else {
+      // V1モード: 従来の方法（現在はV2のみのため使用されない）
+      enabledCount = selectedObjectIds.filter(id => 
+        engine.parameterManager?.isIndividualSettingEnabled?.(id) || false
+      ).length;
+    }
+    
+    // 全て有効化されている場合のみtrueを返す
+    return enabledCount === selectedObjectIds.length;
+  }, [engine, selectedObjectIds]);
   
   // 選択されたテンプレートのパラメータ情報を取得
   const getTemplateParamConfig = (templateId: string) => {
@@ -622,7 +1040,9 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
           </button>
           <button 
             className={`mode-button ${state.editorMode === 'selection' ? 'active' : ''}`}
-            onClick={() => updateState({ editorMode: 'selection' })}
+            onClick={() => {
+              updateState({ editorMode: 'selection' });
+            }}
             disabled={selectedObjectIds.length === 0}
           >
             選択オブジェクト設定
@@ -636,6 +1056,46 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
           <div className="template-section">
             <h3>アニメーションテンプレート</h3>
             <p>アニメーション全体に適用するテンプレートを選択してください。</p>
+            
+            {/* V2モード表示 */}
+            {engine && engine.isUsingParameterManagerV2 && (
+              <div className="v2-mode-indicator" style={{
+                padding: '8px',
+                margin: '8px 0',
+                backgroundColor: engine.isUsingParameterManagerV2() ? '#e8f5e8' : '#f5f5f5',
+                border: engine.isUsingParameterManagerV2() ? '1px solid #4caf50' : '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '12px'
+              }}>
+                <strong>パラメータシステム:</strong> {
+                  engine.isUsingParameterManagerV2() ? 
+                  'V2 (完全初期化モード)' : 
+                  'V1 (継承チェーンモード)'
+                }
+                {engine.isUsingParameterManagerV2() && (
+                  <div style={{ marginTop: '4px', color: '#2e7d32' }}>
+                    ✓ 予測可能なパラメータ動作・継承問題なし
+                  </div>
+                )}
+                {engine.enableParameterManagerV2 && !engine.isUsingParameterManagerV2() && (
+                  <button 
+                    onClick={() => engine.enableParameterManagerV2()}
+                    style={{
+                      marginTop: '4px',
+                      padding: '4px 8px',
+                      backgroundColor: '#4caf50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      fontSize: '11px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    V2モードに切り替え
+                  </button>
+                )}
+              </div>
+            )}
             
             {/* グローバルテンプレートセレクタ */}
             <TemplateSelector
@@ -657,6 +1117,24 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
                 paramConfig={getTemplateParamConfig(selectedTemplate)}
                 onChange={handleGlobalParamChange}
               />
+              
+              {/* 全個別設定強制クリアセクション */}
+              <div className="force-clean-section">
+                <h4>システムメンテナンス</h4>
+                <p>過去に設定された全ての個別オブジェクトパラメータとアクティベーション状態を強制的にクリアします</p>
+                
+                <button 
+                  className="force-clean-button"
+                  onClick={handleForceCleanAllObjectData}
+                  title="全ての個別オブジェクト設定を完全にクリアし、グローバル設定のみを適用します（元に戻せません）"
+                >
+                  全個別設定を強制クリア
+                </button>
+                
+                <div className="force-clean-warning">
+                  ⚠️ 注意: この操作は元に戻せません。全ての緑色マーカーが消え、グローバル設定のみが適用されます。
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -664,7 +1142,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       
       {/* 選択オブジェクト設定モード */}
       {state.editorMode === 'selection' && selectedObjectIds.length > 0 && (
-        <div className="selection-settings">
+        <div className="selection-settings selection-mode-background">
           <div className="object-template-section">
             <h3>
               {selectedObjectType === 'phrase' && 'フレーズテンプレート'}
@@ -708,16 +1186,49 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
               <p>選択された {selectedObjectIds.length}個の{selectedObjectType} のパラメータを一括調整</p>
             )}
             
-            {/* 個別パラメータクリアボタン */}
-            <div className="clear-params-section">
-              <button 
-                className="clear-params-button"
-                onClick={() => handleClearSelectedObjectParams()}
-                title="選択中のオブジェクトの個別設定をすべてクリアします"
-              >
-                個別設定をクリア
-              </button>
+            {/* 個別設定・グローバル設定切り替えスイッチ */}
+            <div className="individual-setting-switch-section">
+              <div className="switch-container">
+                <label className="switch-label">
+                  <span className="switch-text">
+                    設定モード: {state.useIndividualSettings ? '個別設定' : 'グローバル設定'}
+                  </span>
+                  <div className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={state.useIndividualSettings}
+                      onChange={(e) => handleIndividualSettingToggle(e.target.checked)}
+                      className="switch-input"
+                    />
+                    <span className="switch-slider"></span>
+                  </div>
+                </label>
+              </div>
+              <div className="switch-description">
+                {state.useIndividualSettings ? (
+                  <p className="individual-mode-description">
+                    💡 個別設定モード: このオブジェクト専用の設定が適用されます（緑色マーカー表示）
+                  </p>
+                ) : (
+                  <p className="global-mode-description">
+                    💡 グローバル設定モード: プロジェクト全体の設定が適用されます
+                  </p>
+                )}
+              </div>
             </div>
+            
+            {/* 個別設定がONの場合のみクリアボタンを表示 */}
+            {state.useIndividualSettings && (
+              <div className="clear-params-section">
+                <button 
+                  className="clear-params-button"
+                  onClick={handleClearSelectedObjectParams}
+                  title="選択中のオブジェクトの個別設定をすべてクリアします"
+                >
+                  個別設定をクリア
+                </button>
+              </div>
+            )}
             
             {/* 複数選択で異なるテンプレートが混在する場合はパラメータ編集を無効化 */}
             {state.hasMixedTemplates ? (

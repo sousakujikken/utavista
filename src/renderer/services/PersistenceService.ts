@@ -85,6 +85,60 @@ export class PersistenceService {
       throw error;
     }
   }
+  
+  /**
+   * Save font blacklist data
+   */
+  async saveFontBlacklist(blacklist: Array<{
+    fontFamily: string;
+    fontKey: string;
+    reason: string;
+    timestamp: number;
+    errorMessage?: string;
+  }>): Promise<boolean> {
+    try {
+      const result = await window.electronAPI.persistence.saveFontBlacklist(blacklist);
+      if (!result.success) {
+        console.error('Failed to save font blacklist:', result.error);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Error saving font blacklist:', error);
+      return false;
+    }
+  }
+  
+  /**
+   * Load font blacklist data
+   */
+  async loadFontBlacklist(): Promise<{
+    version: number;
+    blacklist: Array<{
+      fontFamily: string;
+      fontKey: string;
+      reason: string;
+      timestamp: number;
+      errorMessage?: string;
+    }>;
+    updatedAt: number;
+  } | null> {
+    try {
+      const result = await window.electronAPI.persistence.loadFontBlacklist();
+      if (!result.success) {
+        if (result.error && result.error.includes('ENOENT')) {
+          // File doesn't exist yet, which is normal for first run
+          return null;
+        }
+        console.error('Failed to load font blacklist:', result.error);
+        return null;
+      }
+      return result.data;
+    } catch (error) {
+      console.error('Error loading font blacklist:', error);
+      return null;
+    }
+  }
 }
 
 export const persistenceService = PersistenceService.getInstance();

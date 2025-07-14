@@ -26,14 +26,12 @@ const PlayerPanel: React.FC<PlayerPanelProps> = ({
     // 波形からのシークイベントを監視
     const handleWaveformSeek = (event: CustomEvent) => {
       if (event.detail && event.detail.currentTime !== undefined) {
-        console.log('PlayerPanel: 波形シークイベントを受信:', event.detail.currentTime + 'ms');
       }
     };
     
     // エンジンからのシークイベントを監視
     const handleEngineSeek = (event: CustomEvent) => {
       if (event.detail && event.detail.currentTime !== undefined) {
-        console.log('PlayerPanel: エンジンシークイベントを受信:', event.detail.currentTime + 'ms');
       }
     };
     

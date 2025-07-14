@@ -1,18 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import PreviewArea from './layout/PreviewArea';
 import TemplateTab from './layout/TemplateTab';
 import PlayerPanel from './layout/PlayerPanel';
 import TimelinePanel from './layout/TimelinePanel';
-import LyricsPanel from './layout/LyricsPanel';
-import MusicPanel from './layout/MusicPanel';
-import VideoExportPanel from './ExportPanel/VideoExportPanel';
-import DebugTab from './layout/DebugTab';
-import BackgroundTab from './layout/BackgroundTab';
-import { SaveTab } from './layout/SaveTab';
+import ContentTab from './layout/ContentTab';
+import ProjectTab from './layout/ProjectTab';
+import SettingsTab from './layout/SettingsTab';
 import ZoomControls from './layout/ZoomControls';
 import SidebarTabs from './ui/SidebarTabs';
 import Engine from '../engine/Engine';
 import { IAnimationTemplate } from '../types/types';
+import { ViewportManager } from '../utils/ViewportManager';
+import { useAdaptiveThrottling } from '../hooks/useThrottledValue';
+import { AutoScrollDebugPanel } from './debug/AutoScrollDebugPanel';
 import '../styles/NewLayout.css';
 import '../styles/components.css';
 
@@ -79,14 +79,45 @@ const NewLayout: React.FC<NewLayoutProps> = ({
   // 歌詞編集モードの状態
   const [lyricsEditMode, setLyricsEditMode] = useState(false);
   
+  // デバッグモード（開発用）
+  const [showAutoScrollDebug, setShowAutoScrollDebug] = useState(false);
+  
+  // スクロール状態管理（継続スクロール防止）
+  const [scrollState, setScrollState] = useState({
+    isScrolling: false,
+    lastScrollTime: 0,
+    lastScrollPosition: 0,
+    scrollCooldown: 500 // 500ms間隔制限
+  });
+  
+  // 手動シーク状態管理
+  const [seekState, setSeekState] = useState({
+    isManualSeeking: false,
+    lastSeekTime: 0,
+    seekSource: 'auto' as 'user' | 'auto' | 'engine'
+  });
+  
   // 現在のズームレベルでの表示範囲、ただしdurationを超えない
   const viewDuration = Math.min(ZOOM_LEVELS[zoomLevel], totalDuration);
   const viewEnd = Math.min(viewStart + viewDuration, totalDuration);
   
+  // ViewportManager インスタンス
+  const viewportManager = useMemo(() => 
+    new ViewportManager(totalDuration, 1000), // 仮の幅、後で更新
+    [totalDuration]
+  );
+  
+  // ViewportManager の状態を更新
+  useEffect(() => {
+    viewportManager.updateViewport(viewStart, viewDuration);
+  }, [viewStart, viewDuration, viewportManager]);
+  
+  // パフォーマンス最適化：適応的throttling
+  const { displayTime, scrollTime } = useAdaptiveThrottling(currentTime, isPlaying);
+  
   // エンジンの有無をログ出力（デバッグ用）
   React.useEffect(() => {
     if (engine) {
-      console.log('NewLayout: Engineインスタンスを受け取りました');
     } else {
       console.warn('NewLayout: Engineインスタンスがありません');
     }
@@ -110,18 +141,17 @@ const NewLayout: React.FC<NewLayoutProps> = ({
   //   setZoomLevel(optimalZoomLevel);
   // }, [totalDuration]);
   
-  // ズームイン・アウトハンドラ
+  // ズームイン・アウトハンドラ（ViewportManager使用版）
   const handleZoomIn = () => {
     if (zoomLevel > 0) {
       const newZoomLevel = zoomLevel - 1;
+      const newViewDuration = Math.min(ZOOM_LEVELS[newZoomLevel], totalDuration);
+      
       setZoomLevel(newZoomLevel);
       
-      // 現在時間が中心に来るように調整
-      const newViewDuration = Math.min(ZOOM_LEVELS[newZoomLevel], totalDuration);
-      const newViewStart = Math.max(0, Math.min(
-        currentTime - newViewDuration / 2,
-        totalDuration - newViewDuration
-      ));
+      // ViewportManagerで中心位置を計算
+      viewportManager.updateViewport(viewStart, newViewDuration);
+      const newViewStart = viewportManager.calculateCenteredViewStart(currentTime);
       setViewStart(newViewStart);
     }
   };
@@ -135,27 +165,111 @@ const NewLayout: React.FC<NewLayoutProps> = ({
       if (newViewDuration > viewDuration) {
         setZoomLevel(newZoomLevel);
         
-        // 現在時間が中心に来るように調整
-        const newViewStart = Math.max(0, Math.min(
-          currentTime - newViewDuration / 2,
-          totalDuration - newViewDuration
-        ));
+        // ViewportManagerで中心位置を計算
+        viewportManager.updateViewport(viewStart, newViewDuration);
+        const newViewStart = viewportManager.calculateCenteredViewStart(currentTime);
         setViewStart(newViewStart);
       }
     }
   };
   
-  // 現在時間に合わせて表示範囲を調整
-  useEffect(() => {
-    // 現在時間が表示範囲外の場合、表示範囲をシフト
-    if (currentTime < viewStart || currentTime > viewEnd) {
-      const newViewStart = Math.max(0, Math.min(
-        currentTime - viewDuration / 4, // 左端から1/4の位置に現在時間を配置
-        totalDuration - viewDuration
-      ));
-      setViewStart(newViewStart);
+  // スクロール条件判定ヘルパー関数（ViewportManager使用版）
+  const canScroll = (currentTime: number): boolean => {
+    const now = Date.now();
+    
+    return (
+      viewportManager.shouldAutoScroll(currentTime) && // ViewportManagerで判定
+      !scrollState.isScrolling && // スクロール中でない
+      now - scrollState.lastScrollTime > scrollState.scrollCooldown && // クールダウン
+      Math.abs(currentTime - scrollState.lastScrollPosition) > viewDuration * 0.1 // 最小移動量
+    );
+  };
+  
+  // フォールバック処理判定（改善版）
+  const shouldApplyFallback = (currentTime: number): boolean => {
+    if (!seekState.isManualSeeking || Date.now() - seekState.lastSeekTime < 100) {
+      return false;
     }
-  }, [currentTime, viewStart, viewEnd, viewDuration, totalDuration]);
+    
+    // 範囲外の場合
+    if (!viewportManager.isTimeVisible(currentTime)) {
+      return true;
+    }
+    
+    // 範囲内でも端に近い場合（70%以上または30%以下）
+    const progress = viewportManager.getProgress(currentTime);
+    return progress > 0.7 || progress < 0.3;
+  };
+  
+  // 現在時間に合わせて表示範囲を調整（パフォーマンス最適化版）
+  useEffect(() => {
+    // 自動スクロール処理（throttling適用）
+    if (canScroll(scrollTime)) {
+      setScrollState(prev => ({ ...prev, isScrolling: true }));
+      
+      const newViewStart = viewportManager.calculateNewViewStart(scrollTime);
+      setViewStart(newViewStart);
+      
+      // スクロール完了後の状態更新
+      setTimeout(() => {
+        setScrollState(prev => ({
+          ...prev,
+          isScrolling: false,
+          lastScrollTime: Date.now(),
+          lastScrollPosition: scrollTime
+        }));
+      }, 50);
+    }
+    
+    // フォールバック処理（手動シーク後）
+    if (shouldApplyFallback(scrollTime)) {
+      // 現在時間を中央に配置
+      const newViewStart = viewportManager.calculateCenteredViewStart(scrollTime);
+      setViewStart(newViewStart);
+      
+      // シーク状態をリセット
+      setTimeout(() => {
+        setSeekState(prev => ({ ...prev, isManualSeeking: false }));
+      }, 500);
+    }
+  }, [scrollTime, viewStart, viewDuration, totalDuration, viewportManager]);
+  // currentTimeからscrollTimeに変更してパフォーマンス最適化
+  // viewEndを除外して循環参照を防止
+  
+  // 手動シークイベントの処理（競合防止）
+  useEffect(() => {
+    const handleSeek = (event: CustomEvent) => {
+      const { source, timestamp } = event.detail;
+      
+      if (source === 'user' || source === 'waveform' || source === 'playerPanel') {
+        setSeekState({
+          isManualSeeking: true,
+          lastSeekTime: timestamp || Date.now(),
+          seekSource: source
+        });
+        
+        // 自動スクロールを一時停止
+        setTimeout(() => {
+          setSeekState(prev => ({ ...prev, isManualSeeking: false }));
+        }, 1000);
+      }
+    };
+    
+    window.addEventListener('engine-seeked', handleSeek);
+    return () => window.removeEventListener('engine-seeked', handleSeek);
+  }, []);
+  
+  // デバッグモードのキーボードショートカット
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.shiftKey && event.key === 'D') {
+        setShowAutoScrollDebug(prev => !prev);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, []);
 
   return (
     <div className="new-layout-container">
@@ -174,8 +288,8 @@ const NewLayout: React.FC<NewLayoutProps> = ({
             />
           </div>
           <div className="sidepanel-area">
-            {/* タブ切り替え実装：背景・保存タブ追加 */}
-            <SidebarTabs labels={['テンプレート', '歌詞', '音楽', '背景', '保存', '動画出力', 'デバッグ']}>
+            {/* タブ切り替え実装：4タブ構成 */}
+            <SidebarTabs labels={['テンプレート', 'コンテンツ', 'プロジェクト', '設定']}>
               {[
                 <TemplateTab
                   key="template-tab"
@@ -184,16 +298,13 @@ const NewLayout: React.FC<NewLayoutProps> = ({
                   engine={engine}
                   template={template}
                 />,
-                <LyricsPanel 
-                  key="lyrics-panel" 
+                <ContentTab 
+                  key="content-tab" 
                   engine={engine} 
                   onLyricsEditModeToggle={() => setLyricsEditMode(true)}
                 />,
-                <MusicPanel key="music-panel" engine={engine} />,
-                <BackgroundTab key="background-tab" engine={engine} />,
-                <SaveTab key="save-tab" engine={engine!} />,
-                <VideoExportPanel key="video-export-panel" engine={engine} onClose={() => {}} />,
-                <DebugTab key="debug-tab" engine={engine} debugInfo={debugInfo} timingDebugInfo={timingDebugInfo} />
+                <ProjectTab key="project-tab" engine={engine!} />,
+                <SettingsTab key="settings-tab" engine={engine} />
               ]}
             </SidebarTabs>
           </div>
@@ -228,13 +339,14 @@ const NewLayout: React.FC<NewLayoutProps> = ({
           {/* 3段のタイムラインパネル */}
           <div className="timeline-area">
             <TimelinePanel
-              currentTime={currentTime}
+              currentTime={displayTime} // 表示用にthrottling適用
               totalDuration={totalDuration}
               engine={engine} // Engineインスタンスを渡す
               template={template} // テンプレートを渡す
               viewStart={viewStart}
               viewDuration={viewDuration}
               zoomLevel={zoomLevel}
+              viewportManager={viewportManager} // ViewportManagerを追加
             />
           </div>
         </section>
@@ -243,6 +355,17 @@ const NewLayout: React.FC<NewLayoutProps> = ({
       <footer className="app-footer">
         {/* 時刻表示を一時的に非表示 */}
       </footer>
+      
+      {/* デバッグパネル（Ctrl+Shift+Dで表示切替） */}
+      {showAutoScrollDebug && (
+        <AutoScrollDebugPanel
+          currentTime={currentTime}
+          viewportManager={viewportManager}
+          scrollState={scrollState}
+          seekState={seekState}
+          isPlaying={isPlaying}
+        />
+      )}
     </div>
   );
 };

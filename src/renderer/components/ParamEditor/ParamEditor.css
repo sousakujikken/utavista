@@ -1,10 +1,11 @@
 .param-editor {
-  padding: 10px;
-  background-color: #2a2a2a;
-  border: 1px solid #3a3a3a;
-  border-radius: 4px;
-  margin-bottom: 10px;
-  color: #f0f0f0;
+  padding: var(--space-sm);
+  background-color: var(--bg-level-3);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-small);
+  margin-bottom: var(--space-sm);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
 }
 
 .param-list {
@@ -85,6 +86,13 @@
   outline: none;
   border-color: #F0059D;
   box-shadow: 0 0 0 2px rgba(240, 5, 157, 0.2);
+}
+
+.param-editor .color-picker-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
 }
 
 .param-editor .color-picker {
@@ -299,4 +307,46 @@ input:checked + .toggle-slider:before {
 .update-fonts-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 最近使用した色のスタイル */
+.recent-colors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recent-colors-label {
+  font-size: 0.8rem;
+  color: #b0b0b0;
+  font-weight: 500;
+}
+
+.recent-colors-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  max-width: 200px;
+}
+
+.recent-color-button {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #4a4a4a;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+  outline: none;
+}
+
+.recent-color-button:hover:not(:disabled) {
+  border-color: #F0059D;
+  box-shadow: 0 0 0 1px rgba(240, 5, 157, 0.3);
+  transform: scale(1.1);
+}
+
+.recent-color-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }

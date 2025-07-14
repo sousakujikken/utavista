@@ -1,0 +1,55 @@
+.common-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.common-input-label {
+  font-family: var(--font-primary);
+  font-size: var(--text-body);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.common-input {
+  padding: var(--space-sm);
+  background-color: var(--bg-level-5);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-small);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  font-size: var(--text-body);
+  transition: var(--transition-normal);
+  outline: none;
+}
+
+.common-input:hover:not(:disabled) {
+  background-color: var(--bg-level-7);
+  border-color: var(--border-prominent);
+}
+
+.common-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(240, 5, 157, 0.2);
+}
+
+.common-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--bg-level-3);
+}
+
+.common-input--full-width {
+  width: 100%;
+}
+
+/* For number inputs, hide spinner in webkit browsers */
+.common-input[type="number"]::-webkit-inner-spin-button,
+.common-input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.common-input[type="number"] {
+  -moz-appearance: textfield;
+}

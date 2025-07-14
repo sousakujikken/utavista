@@ -11,7 +11,6 @@ const DebugVideoTab: React.FC = () => {
   
   // コンソールログをフックして表示する
   useEffect(() => {
-    const originalConsoleLog = console.log;
     const originalConsoleError = console.error;
     const originalConsoleWarn = console.warn;
     
@@ -31,7 +30,6 @@ const DebugVideoTab: React.FC = () => {
     };
     
     // コンソール関数をオーバーライド
-    console.log = (...args) => {
       originalConsoleLog.apply(console, args);
       captureLog('LOG', args);
     };
@@ -48,7 +46,6 @@ const DebugVideoTab: React.FC = () => {
     
     return () => {
       // クリーンアップ時に元に戻す
-      console.log = originalConsoleLog;
       console.error = originalConsoleError;
       console.warn = originalConsoleWarn;
     };
@@ -58,7 +55,6 @@ const DebugVideoTab: React.FC = () => {
   useEffect(() => {
     if (!isInitialized) {
       try {
-        console.log('DebugVideoExporter コンポーネントのマウント');
         exporterRef.current = new DebugVideoExporter(videoContainerId);
         setIsInitialized(true);
       } catch (error) {
@@ -71,7 +67,6 @@ const DebugVideoTab: React.FC = () => {
       if (exporterRef.current) {
         exporterRef.current.destroy();
         exporterRef.current = null;
-        console.log('DebugVideoExporter を破棄しました');
       }
     };
   }, [isInitialized]);
@@ -87,13 +82,11 @@ const DebugVideoTab: React.FC = () => {
     setLogMessages([]);
     
     try {
-      console.log('デバッグ動画作成開始（3秒）');
       await exporterRef.current.startRecording();
       
       // 3秒後に自動的に録画完了
       setTimeout(() => {
         setIsExporting(false);
-        console.log('デバッグ動画作成完了（3秒）');
       }, 3500); // 3秒 + バッファ500ms
       
     } catch (error) {
@@ -113,13 +106,11 @@ const DebugVideoTab: React.FC = () => {
     setLogMessages([]);
     
     try {
-      console.log('15秒デバッグ動画作成開始（バッチ間ジャンプ確認用）');
       await exporterRef.current.startLongRecording(15000); // 15秒
       
       // 15秒後に自動的に録画完了
       setTimeout(() => {
         setIsExporting(false);
-        console.log('15秒デバッグ動画作成完了');
       }, 15500); // 15秒 + バッファ500ms
       
     } catch (error) {

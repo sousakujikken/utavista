@@ -66,6 +66,14 @@ export interface FontInfo {
   path?: string;
 }
 
+export interface TemplateInfo {
+  name: string;
+  path: string;
+  fileName: string;
+  size: number;
+  lastModified: Date;
+}
+
 // IPC Channel definitions
 export interface MainToRendererChannels {
   'file:project-loaded': (projectData: ProjectData) => void;

@@ -1,0 +1,145 @@
+.word-split-editor {
+  background-color: var(--bg-level-0);
+  color: var(--text-primary);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--font-primary);
+}
+
+.word-split-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-standard);
+  background-color: var(--bg-level-1);
+}
+
+.word-split-editor-header h3 {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: normal;
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.word-split-editor-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* ヘッダーボタンスタイルは共通コンポーネントを使用 */
+
+.word-split-editor-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md);
+}
+
+.words-table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: var(--bg-level-1);
+  border-radius: var(--radius-large);
+  overflow: hidden;
+}
+
+.words-table th,
+.words-table td {
+  padding: var(--space-sm);
+  text-align: left;
+  border-bottom: 1px solid var(--border-standard);
+  font-family: var(--font-primary);
+}
+
+.words-table th {
+  background-color: var(--bg-level-3);
+  font-weight: normal;
+  color: var(--text-muted);
+  font-size: var(--text-body);
+}
+
+.words-table tr:hover {
+  background-color: var(--bg-level-3);
+}
+
+.editable-cell {
+  cursor: pointer;
+  position: relative;
+}
+
+.editable-cell:hover {
+  background-color: var(--bg-level-5);
+}
+
+.time-cell {
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  width: 120px;
+}
+
+.edit-input {
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background-color: var(--bg-level-0);
+  color: var(--text-primary);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-small);
+  font-size: inherit;
+  font-family: inherit;
+  outline: none;
+}
+
+.time-input {
+  font-family: var(--font-mono);
+}
+
+.action-cell {
+  width: 150px;
+  text-align: center;
+  display: flex;
+  gap: var(--space-xs);
+  justify-content: center;
+}
+
+/* アクションボタンスタイルは共通コンポーネントを使用 */
+
+.no-words {
+  text-align: center;
+  padding: var(--space-xxl);
+  color: var(--text-disabled);
+  font-size: var(--text-body);
+  font-family: var(--font-primary);
+}
+
+.add-word-section {
+  margin-top: var(--space-md);
+  text-align: center;
+}
+
+/* 追加ボタンスタイルは共通コンポーネントを使用 */
+
+/* スクロールバーのスタイリング */
+.word-split-editor-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.word-split-editor-content::-webkit-scrollbar-track {
+  background: var(--bg-level-0);
+}
+
+.word-split-editor-content::-webkit-scrollbar-thumb {
+  background: var(--color-accent);
+  border-radius: var(--radius-small);
+}
+
+.word-split-editor-content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent-hover);
+}

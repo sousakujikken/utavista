@@ -18,7 +18,7 @@ export class ExportManager {
   
   constructor() {
     this.ffmpegPath = this.getFFmpegPath();
-    this.tempDir = path.join(os.tmpdir(), 'visiblyrics-export');
+    this.tempDir = path.join(os.tmpdir(), 'utavista-export');
     
     // Initialize new Seek and Snap Video Processor
     this.batchVideoProcessor = new BatchVideoProcessor();

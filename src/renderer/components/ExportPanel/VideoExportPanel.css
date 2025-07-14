@@ -1,11 +1,12 @@
 .video-export-panel {
-  background-color: #2a2a2a;
-  color: #e0e0e0;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background-color: var(--bg-level-3);
+  color: var(--text-secondary);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-lg);
   width: 100%;
-  padding: 20px;
+  padding: var(--space-lg);
   box-sizing: border-box;
+  font-family: var(--font-primary);
 }
 
 .export-panel-header {
@@ -33,7 +34,7 @@
 }
 
 .close-button:hover {
-  color: #ff4b4b;
+  color: var(--color-danger);
 }
 
 .export-settings {
@@ -149,6 +150,22 @@
 
 .export-progress {
   margin: 20px 0;
+  background-color: #3a3a3a;
+  border-radius: 6px;
+  padding: 15px;
+  border: 1px solid #555;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.progress-label {
+  font-weight: 500;
+  color: #4caf50;
 }
 
 .progress-bar {
@@ -157,6 +174,7 @@
   background-color: #444;
   border-radius: 10px;
   overflow: hidden;
+  margin-bottom: 10px;
 }
 
 .progress-bar-fill {
@@ -166,9 +184,18 @@
 }
 
 .progress-text {
-  text-align: center;
-  margin-top: 5px;
   font-weight: bold;
+  color: #fff;
+}
+
+.progress-info {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.progress-info small {
+  color: #aaa;
+  font-size: 0.85rem;
 }
 
 .export-error {
@@ -199,12 +226,12 @@
 }
 
 .export-button {
-  background-color: #4caf50;
+  background-color: var(--color-success);
   color: white;
 }
 
 .export-button:hover {
-  background-color: #45a049;
+  background-color: var(--color-success-hover);
 }
 
 .export-button:disabled {
@@ -213,7 +240,7 @@
 }
 
 .debug-export-button {
-  background-color: #ff9800;
+  background-color: var(--color-warning);
   color: white;
   padding: 8px 20px;
   border-radius: 4px;
@@ -224,7 +251,7 @@
 }
 
 .debug-export-button:hover {
-  background-color: #e68a00;
+  background-color: var(--color-warning-hover);
 }
 
 .debug-export-button:disabled {
@@ -233,11 +260,11 @@
 }
 
 .debug-export-button.batch-test {
-  background-color: #2196F3;
+  background-color: var(--color-info);
 }
 
 .debug-export-button.batch-test:hover {
-  background-color: #1976D2;
+  background-color: var(--color-info-hover);
 }
 
 .cancel-button {

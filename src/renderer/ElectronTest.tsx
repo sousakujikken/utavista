@@ -140,7 +140,7 @@ export const ElectronTest: React.FC = () => {
   if (!isElectron) {
     return (
       <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-        <h1>Visiblyrics</h1>
+        <h1>UTAVISTA</h1>
         <p style={{ color: 'orange' }}>
           Running in browser mode. Electron features are not available.
         </p>
@@ -151,7 +151,7 @@ export const ElectronTest: React.FC = () => {
   
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h1>Visiblyrics - Electron Desktop App</h1>
+      <h1>UTAVISTA - Electron Desktop App</h1>
       
       <div style={{ marginBottom: '20px' }}>
         <h2>App Info</h2>
@@ -361,7 +361,7 @@ export const ElectronTest: React.FC = () => {
           <li>✅ Electron app startup</li>
           <li>✅ IPC communication</li>
           <li>✅ File system access</li>
-          <li>🔄 Integrate with existing Visiblyrics components</li>
+          <li>🔄 Integrate with existing UTAVISTA components</li>
           <li>🔄 Video export functionality</li>
         </ul>
       </div>

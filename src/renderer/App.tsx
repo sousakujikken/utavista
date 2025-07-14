@@ -65,20 +65,11 @@ function App() {
   
   // Electron APIの状態を確認
   useEffect(() => {
-    console.log('=== Electron API Check ===');
-    console.log('window.electronAPI:', window.electronAPI);
-    console.log('window.electronAPI?.persistence:', window.electronAPI?.persistence);
-    console.log('Available persistence methods:', window.electronAPI?.persistence ? Object.keys(window.electronAPI.persistence) : 'None');
-    console.log('=========================');
   }, []);
 
   // デバッグ情報を受け取るカスタムイベントリスナー
   useEffect(() => {
     const setupTimestamp = Date.now();
-    console.log(`[${setupTimestamp}] App.tsx: ===== イベントリスナー設定開始 =====`);
-    console.log(`[${setupTimestamp}] App.tsx: engineRef.current: ${engineRef.current ? '存在' : 'null'}`);
-    console.log(`[${setupTimestamp}] App.tsx: engineReady: ${engineReady}`);
-    console.log(`[${setupTimestamp}] App.tsx: totalDuration: ${totalDuration}`);
     
     // カスタムイベントのリスナーを設定
     const handleDebugInfo = (event: CustomEvent) => {
@@ -136,6 +127,18 @@ function App() {
       }
     };
     
+    // タイムライン終了イベントのリスナー
+    const handleTimelineEnded = (event: CustomEvent) => {
+      // クロージャ問題を回避するため、isPlayingをチェックせずに常に停止状態に設定
+      setIsPlaying(false);
+    };
+    
+    // 音声終了イベントのリスナー
+    const handleAudioEnded = (event: CustomEvent) => {
+      // クロージャ問題を回避するため、isPlayingをチェックせずに常に停止状態に設定
+      setIsPlaying(false);
+    };
+    
     // キーボードショートカットのハンドラ
     const handleKeyDown = (event: KeyboardEvent) => {
       // Ctrl+Z: Undo
@@ -144,9 +147,7 @@ function App() {
         if (engineRef.current) {
           const success = engineRef.current.undo();
           if (success) {
-            console.log('Undo実行完了');
           } else {
-            console.log('Undoできません（履歴なし）');
           }
         }
       }
@@ -157,37 +158,83 @@ function App() {
         if (engineRef.current) {
           const success = engineRef.current.redo();
           if (success) {
-            console.log('Redo実行完了');
           } else {
-            console.log('Redoできません（履歴なし）');
           }
+        }
+      }
+      // 開発用ショートカット (Ctrl+Shift+T でパラメータテスト実行)
+      else if (process.env.NODE_ENV === 'development' && event.ctrlKey && event.shiftKey && event.key === 'T') {
+        event.preventDefault();
+        if ((window as any).__PARAMETER_TEST__) {
+          (window as any).__PARAMETER_TEST__();
         }
       }
     };
 
+    // テンプレートレジストリ変更イベントのリスナー
+    const handleTemplateRegistryChanged = async () => {
+      console.log('テンプレートレジストリが変更されました。プロジェクトの状態を保持して再初期化します。');
+      
+      if (engineRef.current) {
+        // 現在のプロジェクト状態を保存
+        const projectStateManager = engineRef.current.getProjectStateManager();
+        const currentState = projectStateManager?.exportFullState();
+        
+        // テンプレート割り当て情報を取得
+        const templateAssignments = engineRef.current.getTemplateManager()?.exportAssignments();
+        
+        // 簡易的な再初期化のため、少し待機してから状態を復元
+        setTimeout(() => {
+          if (engineRef.current && currentState) {
+            // プロジェクト状態を復元
+            projectStateManager?.importState(currentState);
+            
+            // テンプレート割り当てを復元
+            if (templateAssignments) {
+              const templateManager = engineRef.current.getTemplateManager();
+              if (templateManager) {
+                // 各フレーズのテンプレート割り当てを復元
+                Object.entries(templateAssignments).forEach(([phraseId, templateId]) => {
+                  if (templateId && templateId !== templateManager.getDefaultTemplateId()) {
+                    templateManager.assignTemplateToPhrase(phraseId, templateId);
+                  }
+                });
+              }
+            }
+            
+            // インスタンスの再生成をトリガー
+            engineRef.current.forceRecreateInstances();
+            
+            console.log('プロジェクトの状態を復元しました。');
+          }
+        }, 100);
+      }
+    };
+
     // イベントリスナーを追加
-    console.log(`[${setupTimestamp}] App.tsx: イベントリスナー登録開始`);
     window.addEventListener('debug-info-updated', handleDebugInfo as EventListener);
     window.addEventListener('word-debug-info-updated', handleWordDebugInfo as EventListener);
     window.addEventListener('timing-debug-info-updated', handleTimingDebugInfo as EventListener);
     window.addEventListener('timeline-updated', handleTimelineUpdated as EventListener);
     window.addEventListener('waveform-seek', handleWaveformSeek as EventListener);
     window.addEventListener('engine-seeked', handleEngineSeek as EventListener);
+    window.addEventListener('timeline-ended', handleTimelineEnded as EventListener);
+    window.addEventListener('audio-ended', handleAudioEnded as EventListener);
     window.addEventListener('keydown', handleKeyDown);
-    console.log(`[${setupTimestamp}] App.tsx: イベントリスナー登録完了`);
-    console.log(`[${setupTimestamp}] App.tsx: ===== イベントリスナー設定完了 =====`);
+    window.addEventListener('templateRegistryChanged', handleTemplateRegistryChanged as EventListener);
 
     // クリーンアップ
     return () => {
-      console.log(`[${Date.now()}] App.tsx: ===== イベントリスナークリーンアップ =====`);
       window.removeEventListener('debug-info-updated', handleDebugInfo as EventListener);
       window.removeEventListener('word-debug-info-updated', handleWordDebugInfo as EventListener);
       window.removeEventListener('timing-debug-info-updated', handleTimingDebugInfo as EventListener);
       window.removeEventListener('timeline-updated', handleTimelineUpdated as EventListener);
       window.removeEventListener('waveform-seek', handleWaveformSeek as EventListener);
       window.removeEventListener('engine-seeked', handleEngineSeek as EventListener);
+      window.removeEventListener('timeline-ended', handleTimelineEnded as EventListener);
+      window.removeEventListener('audio-ended', handleAudioEnded as EventListener);
       window.removeEventListener('keydown', handleKeyDown);
-      console.log(`[${Date.now()}] App.tsx: イベントリスナークリーンアップ完了`);
+      window.removeEventListener('templateRegistryChanged', handleTemplateRegistryChanged as EventListener);
     };
   }, []); // 一度だけ登録し、イベントハンドラ内で最新のstateを参照する方式に変更
 
@@ -196,7 +243,6 @@ function App() {
   // コンポーネントのアンマウント時にクリーンアップするための効果
   useEffect(() => {
     return () => {
-      console.log("=== 最終クリーンアップ ===");
       
       // requestAnimationFrameをキャンセル
       if (animationFrameRef.current) {
@@ -210,12 +256,10 @@ function App() {
 
   // FontServiceの初期化（アプリケーション起動時に一度だけ）
   useEffect(() => {
-    console.log("=== FontService初期化開始 ===");
     
     const initializeFontService = async () => {
       try {
         await FontService.initialize();
-        console.log("FontService初期化完了");
         setFontServiceReady(true);
       } catch (error) {
         console.error("FontService初期化エラー:", error);
@@ -227,72 +271,14 @@ function App() {
     initializeFontService();
   }, []); // 一度だけ実行
   
-  // 自動保存データの復元確認
-  useEffect(() => {
-    console.log('App.tsx: 自動保存復元イベントリスナーを設定');
-    
-    const handleAutoSaveAvailable = (event: CustomEvent) => {
-      console.log('App.tsx: ===== 自動保存復元イベントを受信 =====');
-      console.log('App.tsx: event.detail:', event.detail);
-      
-      const { timestamp, hasLyrics, hasAudio } = event.detail;
-      const timeAgo = Date.now() - timestamp;
-      const minutes = Math.floor(timeAgo / 60000);
-      const hours = Math.floor(minutes / 60);
-      
-      let timeText = '';
-      if (hours > 0) {
-        timeText = `${hours}時間前`;
-      } else if (minutes > 0) {
-        timeText = `${minutes}分前`;
-      } else {
-        timeText = '数秒前';
-      }
-      
-      const message = `前回の作業内容を復元しますか？\n（${timeText}の自動保存データ）\n\n` +
-                     `歌詞データ: ${hasLyrics ? 'あり' : 'なし'}\n` +
-                     `音楽ファイル: ${hasAudio ? 'あり' : 'なし'}`;
-      
-      console.log('App.tsx: 復元確認ダイアログを表示');
-      console.log('App.tsx: メッセージ:', message);
-      
-      if (window.confirm(message)) {
-        console.log('App.tsx: ユーザーが復元を選択しました');
-        // エンジンが初期化されるまで待つ
-        const checkEngineAndRestore = async () => {
-          if (engineRef.current) {
-            console.log('App.tsx: Engine.loadFromLocalStorage() を実行');
-            await engineRef.current.loadFromLocalStorage();
-            console.log('App.tsx: Engine.loadFromLocalStorage() 完了');
-          } else {
-            console.log('App.tsx: エンジンが初期化されていないため再試行');
-            // エンジンがまだ初期化されていない場合は少し待って再試行
-            setTimeout(checkEngineAndRestore, 100);
-          }
-        };
-        checkEngineAndRestore();
-      } else {
-        console.log('App.tsx: ユーザーが復元をキャンセルしました');
-      }
-    };
-    
-    window.addEventListener('visiblyrics:autosave-available', handleAutoSaveAvailable as EventListener);
-    
-    return () => {
-      console.log('App.tsx: 自動保存復元イベントリスナーを削除');
-      window.removeEventListener('visiblyrics:autosave-available', handleAutoSaveAvailable as EventListener);
-    };
-  }, []);
+  // 復元ダイアログを廃止し、Engine側で自動復元を実行
+  // 復元関連のイベントリスナーは不要になりました
 
   // 初回のエンジン初期化（1回のみ）
   useEffect(() => {
-    console.log("=== アプリケーション初期化（初回のみ） ===");
-    console.log("テストデータ:", testLyricsData);
-    console.log("現在選択されているテンプレートID:", selectedTemplate);
     
     // FontServiceの初期化を待ってからエンジンを初期化
     if (!fontServiceReady) {
-      console.log("FontService初期化待機中...");
       return;
     }
     
@@ -306,7 +292,6 @@ function App() {
         try {
           const canvasElement = document.getElementById('canvasContainer');
           if (canvasElement) {
-            console.log("canvasContainer要素を検出しました。エンジンを初期化します。");
             initEngine();
           } else {
             console.error("canvasContainer要素が見つかりません。エンジン初期化をスキップします。");
@@ -328,8 +313,6 @@ function App() {
       return;
     }
     
-    console.log("=== テンプレート変更処理 ===");
-    console.log("新しいテンプレートID:", selectedTemplate);
     
     try {
       // テンプレートレジストリから動的にテンプレートを取得
@@ -347,7 +330,7 @@ function App() {
       
       // 既存のパラメータを取得し、不足分をデフォルト値で補完
       const existingParams = engineRef.current.parameterManager 
-        ? engineRef.current.parameterManager.getGlobalParams() 
+        ? engineRef.current.parameterManager.getGlobalDefaults() 
         : {};
       
       // デフォルトパラメータを取得
@@ -364,7 +347,6 @@ function App() {
       const success = engineRef.current.changeTemplate(template, mergedParams, selectedTemplate);
       if (success) {
         setCurrentTemplate(template);
-        console.log("テンプレート変更完了 - 歌詞データとマーカー調整結果を保持");
       } else {
         console.error("テンプレート変更に失敗しました");
       }
@@ -378,7 +360,6 @@ function App() {
     const handleProjectLoaded = (event: CustomEvent) => {
       const { globalTemplateId } = event.detail;
       if (globalTemplateId && globalTemplateId !== selectedTemplate) {
-        console.log('App: プロジェクトロード時のテンプレートをUIに反映:', globalTemplateId);
         setSelectedTemplate(globalTemplateId);
       }
     };
@@ -386,17 +367,25 @@ function App() {
     const handleTemplateLoaded = (event: CustomEvent) => {
       const { templateId } = event.detail;
       if (templateId && templateId !== selectedTemplate) {
-        console.log('App: ロードされたテンプレートをUIに反映:', templateId);
+        setSelectedTemplate(templateId);
+      }
+    };
+
+    const handleAutoRestoreTemplateUpdated = (event: CustomEvent) => {
+      const { templateId } = event.detail;
+      if (templateId && templateId !== selectedTemplate) {
         setSelectedTemplate(templateId);
       }
     };
 
     window.addEventListener('project-loaded', handleProjectLoaded as EventListener);
     window.addEventListener('template-loaded', handleTemplateLoaded as EventListener);
+    window.addEventListener('auto-restore-template-updated', handleAutoRestoreTemplateUpdated as EventListener);
 
     return () => {
       window.removeEventListener('project-loaded', handleProjectLoaded as EventListener);
       window.removeEventListener('template-loaded', handleTemplateLoaded as EventListener);
+      window.removeEventListener('auto-restore-template-updated', handleAutoRestoreTemplateUpdated as EventListener);
     };
   }, [selectedTemplate]);
 
@@ -442,8 +431,7 @@ function App() {
       const systemDefaults = {
         fontSize: 120,
         fontFamily: 'Arial',
-        fill: '#FFA500', // オレンジ色
-        defaultTextColor: '#FFA500', // オレンジ色
+        textColor: '#FFA500', // オレンジ色 - 統一パラメータ名使用
         activeTextColor: '#FFA500', // オレンジ色
         completedTextColor: '#FFA500' // オレンジ色
       };
@@ -468,30 +456,42 @@ function App() {
       }
       
       const engineInitTimestamp = Date.now();
-      console.log(`[${engineInitTimestamp}] App.tsx: ===== エンジン初期化開始 =====`);
       
       // PIXIエンジンの初期化
       const engine = new Engine('canvasContainer', template, params, selectedTemplate);
-      console.log(`[${engineInitTimestamp}] App.tsx: Engine作成完了`);
       
       // エンジンインスタンスを保存（自動保存チェックの前に設定）
       engineRef.current = engine;
-      console.log(`[${engineInitTimestamp}] App.tsx: engineRef.current設定完了`);
+      
+      // 開発用：グローバルアクセスのためにエンジンを設定
+      if (process.env.NODE_ENV === 'development') {
+        (window as any).__ENGINE__ = engine;
+        (window as any).__PARAMETER_TEST__ = () => {
+          // 動的にテストプログラムをインポートして実行
+          import('./engine/__tests__/ParameterConsistencyTest').then(({ runParameterTest }) => {
+            runParameterTest(
+              engine.parameterManagerV2,
+              engine.templateManager,
+              engine.instanceManager,
+              'phrase_1751341417869_k7b01lewz'
+            );
+          }).catch(error => {
+            console.error('パラメータテストの実行に失敗しました:', error);
+          });
+        };
+      }
       
       // 注意：テスト歌詞のロードはしない
       // Engine初期化時にcheckAndPromptAutoRestore()が呼ばれ、
       // 自動保存データがある場合は復元ダイアログが表示される
       // 自動保存データがない場合や復元しない場合は、ユーザーが手動で歌詞をロードする
-      console.log(`[${engineInitTimestamp}] App.tsx: テスト歌詞の自動ロードをスキップ（復元プロセスを優先）`);
 
       // エンジンから実際の持続時間を取得
       const { duration: engineDuration } = engine.getTimelineData();
       setTotalDuration(engineDuration);
-      console.log(`アニメーション期間: 0-${engineDuration}ms（エンジンから取得）`);
       
       // デバッグ機能を有効化
       engine.setDebugEnabled(true);
-      console.log('デバッグ機能を有効化しました');
       
       // 初期表示
       engine.seek(0);
@@ -505,7 +505,6 @@ function App() {
       
       // エンジン初期化完了をマーク
       setEngineReady(true);
-      console.log("Engine 初期化完了");
       
       // updateFrameループを開始
       if (!animationFrameRef.current) {
@@ -556,7 +555,6 @@ function App() {
               }
             });
           window.dispatchEvent(event);
-          console.log(`デバッグ情報初期化: 中心座標=(${centerX}, ${centerY})`);
         }
       }, 100);
     } catch (error) {
@@ -579,11 +577,10 @@ function App() {
         lastTimeRef.current = currentEngineTime;
       }
       
-      // 再生中で終了時間に達した場合のみ停止処理
+      // 注意: Engine側で終了時刻チェックが実装されたため、
+      // ここでの終了チェックは冗長になりましたが、念のため残しています
       if (currentEngineTime >= totalDuration && isPlaying) {
-        console.log("アニメーション終了");
         handlePause();
-        handleReset();
         return;
       }
     }
@@ -594,7 +591,6 @@ function App() {
 
   // 再生ハンドラ
   const handlePlay = () => {
-    console.log("再生ボタンクリック");
     if (engineRef.current) {
       engineRef.current.play();
       setIsPlaying(true);
@@ -609,7 +605,6 @@ function App() {
 
   // 一時停止ハンドラ
   const handlePause = () => {
-    console.log("一時停止ボタンクリック");
     if (engineRef.current) {
       engineRef.current.pause();
       setIsPlaying(false);
@@ -623,7 +618,6 @@ function App() {
 
   // リセットハンドラ
   const handleReset = () => {
-    console.log("リセットボタンクリック");
     if (engineRef.current) {
       engineRef.current.reset();
       setCurrentTime(0);
@@ -633,19 +627,11 @@ function App() {
   // シークハンドラ
   const handleSeek = (value: number) => {
     const handleSeekTimestamp = Date.now();
-    console.log(`[${handleSeekTimestamp}] App.tsx: ===== handleSeek関数実行 =====`);
-    console.log(`[${handleSeekTimestamp}] App.tsx: シーク値: ${value}ms`);
-    console.log(`[${handleSeekTimestamp}] App.tsx: engineRef.current: ${engineRef.current ? '存在' : 'null'}`);
-    console.log(`[${handleSeekTimestamp}] App.tsx: 現在のcurrentTime: ${currentTime}ms`);
     
     if (engineRef.current) {
-      console.log(`[${handleSeekTimestamp}] App.tsx: Engine.seek(${value})を実行します`);
       engineRef.current.seek(value);
-      console.log(`[${handleSeekTimestamp}] App.tsx: Engine.seek(${value})実行完了`);
       
-      console.log(`[${handleSeekTimestamp}] App.tsx: setCurrentTime(${value})を実行します`);
       setCurrentTime(value);
-      console.log(`[${handleSeekTimestamp}] App.tsx: setCurrentTime(${value})実行完了`);
       
       // シーク後に強制的にデバッグ情報を更新
       setTimeout(() => {
@@ -672,12 +658,10 @@ function App() {
     } else {
       console.warn(`[${handleSeekTimestamp}] App.tsx: engineRef.currentがnullのためシークをスキップします`);
     }
-    console.log(`[${handleSeekTimestamp}] App.tsx: ===== handleSeek関数完了 =====`);
   };
 
   // テンプレート変更ハンドラ（再生を停止ぜずテンプレートのみ変更）
   const handleTemplateChange = (template: string) => {
-    console.log(`テンプレート変更: ${template} - 再生状態を保持`);
     // 再生中でも停止せず、テンプレートのみ変更
     setSelectedTemplate(template);
   };

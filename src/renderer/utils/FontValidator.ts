@@ -65,7 +65,6 @@ export class FontValidator {
 
       return isValid;
     } catch (error) {
-      console.debug(`[FontValidator] Error validating font "${fontFamily}":`, error);
       this.invalidFonts.add(fontFamily);
       return false;
     }
@@ -101,7 +100,6 @@ export class FontValidator {
         return (document as any).fonts.check(`12px "${fontFamily}"`);
       }
     } catch (error) {
-      console.debug('[FontValidator] Document Font API not available or error:', error);
     }
     return null;
   }
@@ -185,8 +183,5 @@ export class FontValidator {
    * デバッグ情報を出力
    */
   static debug(): void {
-    console.log('[FontValidator] 検証済みフォント:');
-    console.log('  有効:', Array.from(this.validatedFonts));
-    console.log('  無効:', Array.from(this.invalidFonts));
   }
 }

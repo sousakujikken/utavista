@@ -4,6 +4,8 @@ import { unifiedFileManager } from './UnifiedFileManager';
 import { Engine } from '../engine/Engine';
 import { DebugEventBus } from '../utils/DebugEventBus';
 import { calculateCharacterIndices } from '../utils/characterIndexCalculator';
+import { StandardParameters } from '../types/StandardParameters';
+import { ParameterValidator } from '../../utils/ParameterValidator';
 
 // プロジェクトファイルのメタデータ
 export interface ProjectMetadata {
@@ -28,6 +30,8 @@ export interface ProjectFileData {
   globalParams: Record<string, any>;
   objectParams: Record<string, Record<string, any>>;
   backgroundColor?: string;
+  // 個別設定情報
+  individualSettingsEnabled?: string[];
   // 後方互換性のため（読み込み時のみ使用）
   defaultTemplateId?: string;
   templateAssignments?: Record<string, string>;
@@ -44,7 +48,7 @@ export interface ValidationResult {
  */
 export class ProjectFileManager {
   private static readonly CURRENT_VERSION = '0.1.0';
-  private static readonly FILE_EXTENSION = '.vbl';
+  private static readonly FILE_EXTENSION = '.uta';
   
   constructor(private engine: Engine) {}
 
@@ -57,10 +61,27 @@ export class ProjectFileManager {
   }
   
   /**
+   * パラメータを正規化するヘルパーメソッド
+   */
+  private normalizeParameters(params: unknown): StandardParameters {
+    // V2の圧縮形式フィールドを除外
+    const paramsToValidate = { ...params } as any;
+    delete paramsToValidate.parameterDiff;
+    delete paramsToValidate.templateId;
+    
+    const validation = ParameterValidator.validate(paramsToValidate);
+    if (!validation.isValid) {
+      console.warn('Parameter normalization warnings:', validation.errors);
+    }
+    return validation.sanitized;
+  }
+  
+  /**
    * プロジェクトデータを読み込み（Electron経由など）
    * @param projectData プロジェクトデータ
    */
   async loadProjectData(projectData: ProjectFileData): Promise<void> {
+    
     // バリデーション
     const validation = this.validateProjectData(projectData);
     if (!validation.isValid) {
@@ -69,9 +90,6 @@ export class ProjectFileManager {
     
     // 文字インデックスを計算
     const lyricsWithIndices = calculateCharacterIndices(projectData.lyricsData);
-    
-    // エンジンに歌詞データを設定
-    this.engine.loadLyrics(lyricsWithIndices);
     
     // グローバルテンプレートIDを取得（後方互換性対応）
     const globalTemplateId = projectData.globalTemplateId || projectData.defaultTemplateId || 'FadeSlideText';
@@ -85,19 +103,23 @@ export class ProjectFileManager {
       objectParams: projectData.objectParams,
       backgroundColor: projectData.backgroundColor,
       audioFileName: projectData.audio.fileName,
-      audioFileDuration: projectData.audio.duration
+      audioFileDuration: projectData.audio.duration,
+      individualSettingsEnabled: projectData.individualSettingsEnabled || []
     };
     
     // グローバルテンプレートを設定
     this.engine.getTemplateManager().setDefaultTemplateId(globalTemplateId);
     
-    // グローバルパラメータを復元
-    if (projectData.globalParams) {
-      this.engine.getParameterManager().updateGlobalParams(projectData.globalParams);
-      console.log('ProjectFileManager: グローバルパラメータを復元:', projectData.globalParams);
+    // V2パラメータデータの復元
+    if ((projectData as any).parameterData) {
+      // V2形式のデータを直接インポート
+      this.engine.getParameterManager().importCompressed((projectData as any).parameterData);
+    } else {
+      throw new Error('V1プロジェクトファイルは非対応です。V2形式で再保存してください。');
     }
     
     this.engine.getStateManager().importState(state);
+    
     
     // objectParamsからテンプレート割り当てを復元
     for (const [objectId, params] of Object.entries(projectData.objectParams)) {
@@ -106,14 +128,6 @@ export class ProjectFileManager {
       if (templateId && templateId !== '__global__') {
         // 個別テンプレートが指定されている場合
         this.engine.getTemplateManager().assignTemplate(objectId, templateId);
-      }
-      
-      // templateId以外のパラメータを設定
-      const paramsWithoutTemplateId = { ...params };
-      delete paramsWithoutTemplateId.templateId;
-      
-      if (Object.keys(paramsWithoutTemplateId).length > 0) {
-        this.engine.getParameterManager().updateObjectParams(objectId, paramsWithoutTemplateId);
       }
     }
     
@@ -133,6 +147,27 @@ export class ProjectFileManager {
       detail: { globalTemplateId }
     }));
     
+    // タイムライン更新イベントを発火（アクティベーション状態の反映のため）
+    window.dispatchEvent(new CustomEvent('timeline-updated', {
+      detail: { lyrics: this.engine.phrases }
+    }));
+    
+    // テンプレート適用完了後に歌詞データを読み込み、その後個別設定を遅延適用
+    setTimeout(() => {
+      try {
+        // 歌詞データをエンジンに設定
+        this.engine.loadLyrics(lyricsWithIndices);
+        
+        // 個別設定の適用
+        const individualSettingsEnabled = projectData.individualSettingsEnabled || [];
+        if (individualSettingsEnabled.length > 0) {
+          this.applyIndividualSettingsToAnimation(individualSettingsEnabled);
+        }
+      } catch (error) {
+        console.error('[ProjectFileManager] 歌詞データ読み込みまたは個別設定適用に失敗:', error);
+      }
+    }, 150);
+    
     DebugEventBus.emit('project-loaded', { 
       fileName: projectData.metadata.projectName,
       globalTemplateId
@@ -148,13 +183,7 @@ export class ProjectFileManager {
       // プロジェクトデータを構築
       const projectData = this.buildProjectData(fileName);
       
-      // デバッグ情報を出力
-      console.log('ProjectFileManager: 保存データ', {
-        globalTemplateId: projectData.globalTemplateId,
-        objectParamsCount: Object.keys(projectData.objectParams).length,
-        sampleObjectParams: Object.entries(projectData.objectParams).slice(0, 3)
-      });
-      
+    
       // エレクトロンのファイル保存APIを使用
       const filePath = await unifiedFileManager.saveProject(projectData);
       
@@ -188,8 +217,8 @@ export class ProjectFileManager {
       // 文字インデックスを計算
       const lyricsWithIndices = calculateCharacterIndices(projectData.lyricsData);
       
-      // エンジンに歌詞データを設定
-      this.engine.loadLyrics(lyricsWithIndices);
+      // レガシーparams構造を削除（V2移行後の不整合対策）
+      this.cleanupLegacyParams(lyricsWithIndices);
       
       // グローバルテンプレートIDを取得（後方互換性対応）
       const globalTemplateId = projectData.globalTemplateId || projectData.defaultTemplateId || 'FadeSlideText';
@@ -203,35 +232,34 @@ export class ProjectFileManager {
         objectParams: projectData.objectParams,
         backgroundColor: projectData.backgroundColor,
         audioFileName: projectData.audio.fileName,
-        audioFileDuration: projectData.audio.duration
+        audioFileDuration: projectData.audio.duration,
+        individualSettingsEnabled: projectData.individualSettingsEnabled || []
       };
       
       // グローバルテンプレートを設定
       this.engine.getTemplateManager().setDefaultTemplateId(globalTemplateId);
       
-      // グローバルパラメータを復元
-      if (projectData.globalParams) {
-        this.engine.getParameterManager().updateGlobalParams(projectData.globalParams);
-        console.log('ProjectFileManager: グローバルパラメータを復元:', projectData.globalParams);
+      // V2パラメータデータの復元
+      if ((projectData as any).parameterData) {
+        // V2形式のデータを直接インポート
+        this.engine.getParameterManager().importCompressed((projectData as any).parameterData);
+        
+        // V2パラメータデータは復元完了、テンプレート割り当ては遅延実行
+      } else {
+        throw new Error('V1プロジェクトファイルは非対応です。V2形式で再保存してください。');
       }
       
       this.engine.getStateManager().importState(state);
       
-      // objectParamsからテンプレート割り当てを復元
+      // 後方互換性：objectParamsからテンプレート割り当てを復元（V2データがない場合のみ）
       for (const [objectId, params] of Object.entries(projectData.objectParams)) {
         const templateId = params.templateId;
         
         if (templateId && templateId !== '__global__') {
-          // 個別テンプレートが指定されている場合
-          this.engine.getTemplateManager().assignTemplate(objectId, templateId);
-        }
-        
-        // templateId以外のパラメータを設定
-        const paramsWithoutTemplateId = { ...params };
-        delete paramsWithoutTemplateId.templateId;
-        
-        if (Object.keys(paramsWithoutTemplateId).length > 0) {
-          this.engine.getParameterManager().updateObjectParams(objectId, paramsWithoutTemplateId);
+          // V2データで既に設定されていない場合のみ適用
+          if (!this.engine.getTemplateManager().assignments.has(objectId)) {
+            this.engine.getTemplateManager().assignTemplate(objectId, templateId);
+          }
         }
       }
       
@@ -257,20 +285,7 @@ export class ProjectFileManager {
         });
       }
       
-      // グローバルテンプレートを実際に適用
-      if (globalTemplateId && globalTemplateId !== 'default') {
-        // テンプレートレジストリからテンプレートを取得
-        const { getTemplateById } = await import('../templates/registry/templateRegistry');
-        const globalTemplate = getTemplateById(globalTemplateId);
-        
-        if (globalTemplate) {
-          // テンプレートをエンジンに適用
-          this.engine.changeTemplate(globalTemplate, projectData.globalParams || {}, globalTemplateId);
-          console.log('ProjectFileManager: グローバルテンプレートを適用:', globalTemplateId);
-        } else {
-          console.warn('ProjectFileManager: テンプレートが見つかりません:', globalTemplateId);
-        }
-      }
+      // テンプレート適用は歌詞データ読み込み後に移動
       
       // デバッグイベント発行
       DebugEventBus.emit('project-loaded', { 
@@ -290,18 +305,88 @@ export class ProjectFileManager {
       
       // 文字配置の再計算を実行（背景タブ選択時と同じ処理）
       // テンプレート適用が完了してから実行されるように遅延を設定
-      setTimeout(() => {
+      setTimeout(async () => {
         if (this.engine && this.engine.app && this.engine.app.renderer) {
-          console.log('ProjectFileManager: ロード後の文字配置を再計算します');
-          // 背景タブでのアスペクト比変更時と同じ処理を実行
-          this.engine.arrangeCharsOnStage();
-          if (this.engine.instanceManager) {
-            this.engine.instanceManager.loadPhrases(this.engine.phrases, this.engine.charPositions);
-            this.engine.instanceManager.update(this.engine.currentTime);
+          try {
+            // 歌詞データをエンジンに設定
+            this.engine.loadLyrics(lyricsWithIndices);
+            
+            // 背景タブでのアスペクト比変更時と同じ処理を実行
+            this.engine.arrangeCharsOnStage();
+            if (this.engine.instanceManager) {
+              this.engine.instanceManager.loadPhrases(this.engine.phrases, this.engine.charPositions);
+              this.engine.instanceManager.update(this.engine.currentTime);
+            }
+            
+            // PIXIアプリケーションの完全初期化を待つ
+            setTimeout(async () => {
+              try {
+                // 歌詞データ読み込み後にテンプレートを適用
+                if (globalTemplateId && globalTemplateId !== 'default') {
+                  
+                  // PIXIアプリケーションとインスタンスが完全に準備されているかチェック
+                  if (!this.engine.app || !this.engine.app.renderer || !this.engine.instanceManager || !this.engine.phrases || this.engine.phrases.length === 0) {
+                    console.warn('ProjectFileManager: PIXI、InstanceManager、または歌詞データが未初期化のため、テンプレート適用をスキップ');
+                    return;
+                  }
+                  
+                  // さらに詳細なPIXI状態チェック
+                  try {
+                    const testRender = this.engine.app.renderer.render;
+                    if (!testRender) {
+                      console.warn('ProjectFileManager: PIXIレンダラーが完全に初期化されていないため、テンプレート適用をスキップ');
+                      return;
+                    }
+                  } catch (renderTest) {
+                    console.warn('ProjectFileManager: PIXIレンダラーテストに失敗、テンプレート適用をスキップ:', renderTest);
+                    return;
+                  }
+                  
+                  const { getTemplateById } = await import('../templates/registry/templateRegistry');
+                  const globalTemplate = getTemplateById(globalTemplateId);
+                  
+                  if (globalTemplate) {
+                    try {
+                      // テンプレートをエンジンに適用
+                      const success = this.engine.changeTemplate(globalTemplate, projectData.globalParams || {}, globalTemplateId);
+                      if (success) {
+                      } else {
+                      }
+                    } catch (templateError) {
+                      console.error('[ProjectFileManager] テンプレート適用エラー:', templateError);
+                      // エラーが発生してもプロジェクト読み込みは継続
+                    }
+                  } else {
+                    console.warn('ProjectFileManager: テンプレートが見つかりません:', globalTemplateId);
+                  }
+                }
+                
+                // V2データからテンプレート割り当てを復元（フェーズ2で実行）
+                if ((projectData as any).parameterData) {
+                  this.syncTemplateAssignmentsFromV2Data((projectData as any).parameterData);
+                }
+                
+                // デバッグ情報の表示
+                const actualTemplate = this.engine.getTemplateManager().getAssignment('phrase_1751341417869_k7b01lewz');
+                
+                if (projectData.objectParams['phrase_1751341417869_k7b01lewz']) {
+                  const objectParamsTemplate = projectData.objectParams['phrase_1751341417869_k7b01lewz'].templateId;
+                }
+                
+                // テンプレート適用完了後に個別設定を強制適用
+                const individualSettingsEnabled = projectData.individualSettingsEnabled || [];
+                if (individualSettingsEnabled.length > 0) {
+                  this.applyIndividualSettingsToAnimation(individualSettingsEnabled);
+                }
+              } catch (error) {
+                console.error('[ProjectFileManager] テンプレート適用または個別設定適用に失敗:', error);
+              }
+            }, 300); // テンプレート適用のための追加遅延
+          } catch (error) {
+            console.error('[ProjectFileManager] 歌詞データ読み込みまたは個別設定適用に失敗:', error);
           }
-          console.log('ProjectFileManager: 文字配置の再計算が完了しました');
         }
-      }, 300); // テンプレート適用完了を待つため遅延を延長
+      }, 500); // PIXIアプリケーションの完全初期化を待つため遅延を延長
       
       // プロジェクトロード完了イベントを発火
       window.dispatchEvent(new CustomEvent('project-loaded', {
@@ -323,25 +408,13 @@ export class ProjectFileManager {
    */
   private buildProjectData(projectName: string): ProjectFileData {
     const state = this.engine.getStateManager().exportFullState();
-    console.log('ProjectFileManager: buildProjectData - 取得した状態', {
-      lyricsDataLength: state.lyricsData?.length,
-      lyricsDataSample: state.lyricsData?.slice(0, 1), // 最初のフレーズだけ表示
-      timestamp: state.timestamp
-    });
     
     // Engineから直接歌詞データも取得して比較
     const engineLyrics = this.engine.getTimelineData().lyrics;
-    console.log('ProjectFileManager: Engine直接取得の歌詞データ', {
-      engineLyricsLength: engineLyrics?.length,
-      engineLyricsSample: engineLyrics?.slice(0, 1)
-    });
     
     const now = new Date().toISOString();
     const templateManager = this.engine.getTemplateManager();
     const globalTemplateId = templateManager.getDefaultTemplateId();
-    
-    // デバッグ: グローバルテンプレートIDを確認
-    console.log('ProjectFileManager: globalTemplateId =', globalTemplateId);
     
     // objectParamsにtemplateIdを追加
     const enhancedObjectParams: Record<string, Record<string, any>> = {};
@@ -353,10 +426,12 @@ export class ProjectFileManager {
         const phraseTemplate = templateManager.getTemplateForObject(phrase.id);
         const phraseTemplateId = this.getTemplateIdForObject(phrase.id, phraseTemplate, templateManager, globalTemplateId);
         
+        // V2では直接パラメータを取得
+        const v2Params = this.engine.getParameterManager().getParameters(phrase.id);
         enhancedObjectParams[phrase.id] = {
-          ...(state.objectParams[phrase.id] || {}),
+          ...this.normalizeParameters(v2Params),
           templateId: phraseTemplateId
-        };
+        } as StandardParameters;
         
         // 単語レベル
         phrase.words.forEach((word, wordIndex) => {
@@ -364,11 +439,13 @@ export class ProjectFileManager {
           const wordTemplate = templateManager.getTemplateForObject(wordId);
           const wordTemplateId = this.getTemplateIdForObject(wordId, wordTemplate, templateManager, globalTemplateId);
           
-          if (wordTemplateId !== '__global__' || state.objectParams[wordId]) {
+          if (wordTemplateId !== '__global__') {
+            // V2では直接パラメータを取得
+            const wordParams = this.engine.getParameterManager().getParameters(wordId);
             enhancedObjectParams[wordId] = {
-              ...(state.objectParams[wordId] || {}),
+              ...this.normalizeParameters(wordParams),
               templateId: wordTemplateId
-            };
+            } as StandardParameters;
           }
           
           // 文字レベル
@@ -377,18 +454,23 @@ export class ProjectFileManager {
             const charTemplate = templateManager.getTemplateForObject(charId);
             const charTemplateId = this.getTemplateIdForObject(charId, charTemplate, templateManager, globalTemplateId);
             
-            if (charTemplateId !== '__global__' || state.objectParams[charId]) {
+            if (charTemplateId !== '__global__') {
+              // V2では直接パラメータを取得
+              const charParams = this.engine.getParameterManager().getParameters(charId);
               enhancedObjectParams[charId] = {
-                ...(state.objectParams[charId] || {}),
+                ...this.normalizeParameters(charParams),
                 templateId: charTemplateId
-              };
+              } as StandardParameters;
             }
           });
         });
       }
     }
     
-    return {
+    // V2: パラメータマネージャーからV2形式のデータを取得
+    const parameterData = this.engine.getParameterManager().exportCompressed();
+    
+    const projectData: ProjectFileData = {
       version: ProjectFileManager.CURRENT_VERSION,
       metadata: {
         projectName: projectName.replace(ProjectFileManager.FILE_EXTENSION, ''),
@@ -401,10 +483,16 @@ export class ProjectFileManager {
       },
       lyricsData: engineLyrics || state.lyricsData || [], // Engineから直接取得を優先
       globalTemplateId: globalTemplateId,
-      globalParams: state.globalParams,
+      globalParams: this.normalizeParameters(this.engine.getParameterManager().getGlobalDefaults()),
       objectParams: enhancedObjectParams,
-      backgroundColor: state.backgroundColor
+      backgroundColor: state.backgroundColor,
+      individualSettingsEnabled: this.engine.getParameterManager().getIndividualSettingsEnabled() // V2統一管理で個別設定リストを取得
     };
+    
+    // V2パラメータデータを別フィールドとして追加
+    (projectData as any).parameterData = parameterData;
+    
+    return projectData;
   }
   
   /**
@@ -439,12 +527,6 @@ export class ProjectFileManager {
   validateProjectData(data: any): ValidationResult {
     const errors: string[] = [];
     
-    console.log('ProjectFileManager: プロジェクトデータの検証開始', {
-      hasData: !!data,
-      version: data?.version,
-      lyricsDataLength: data?.lyricsData?.length,
-      keys: data ? Object.keys(data) : []
-    });
     
     // 必須フィールドのチェック（必要最小限に緩和）
     if (!data.version) {
@@ -527,7 +609,6 @@ export class ProjectFileManager {
           delete phrase.outTime;
         } else if (hasOldFormat && !hasNewFormat) {
           // 旧形式のデータを新しい形式に変換
-          console.log(`ProjectFileManager: 旧形式データを新形式に変換: ${phrase.id}`);
           phrase.phrase = phrase.text;
           phrase.start = phrase.inTime;
           phrase.end = phrase.outTime;
@@ -583,12 +664,6 @@ export class ProjectFileManager {
       errors
     };
     
-    console.log('ProjectFileManager: プロジェクトデータの検証完了', {
-      isValid: result.isValid,
-      errorsCount: result.errors.length,
-      errors: result.errors
-    });
-    
     return result;
   }
 
@@ -598,5 +673,112 @@ export class ProjectFileManager {
   private isVersionCompatible(version: string): boolean {
     // 現在は0.1.0のみサポート
     return version === ProjectFileManager.CURRENT_VERSION;
+  }
+  
+  /**
+   * 個別設定が有効なオブジェクトのパラメータを強制的にアニメーションに適用
+   */
+  private applyIndividualSettingsToAnimation(individualSettingsEnabled: string[]): void {
+    // 各個別設定オブジェクトのパラメータをエンジンに強制適用
+    individualSettingsEnabled.forEach((objectId) => {
+      try {
+        // パラメータキャッシュを強制的に無効化
+        const paramManager = this.engine.getParameterManager();
+        paramManager.forceRefreshCache();
+        
+        // エンジンのforceUpdateObjectInstanceメソッドを使用してアニメーションに反映
+        this.engine.forceUpdateObjectInstance(objectId);
+        
+        // 追加の強制更新：InstanceManagerの既存インスタンスを更新
+        if (this.engine.instanceManager) {
+          this.engine.instanceManager.updateExistingInstances();
+        }
+      } catch (error) {
+        console.warn(`ProjectFileManager: オブジェクト ${objectId} の個別パラメータ適用に失敗:`, error);
+      }
+    });
+    
+    // 全体のインスタンス更新を実行
+    try {
+      if (this.engine.instanceManager) {
+        // テンプレートとパラメータの割り当て情報を更新
+        this.engine.instanceManager.updateTemplateAssignments(
+          this.engine.getTemplateManager()
+        );
+        
+        // テンプレート全体を再適用（個別設定を含む）
+        if (this.engine.template) {
+          this.engine.instanceManager.updateTemplate(this.engine.template);
+        }
+        
+        // 全インスタンスを更新
+        this.engine.instanceManager.updateExistingInstances();
+        
+        // 現在時刻でアニメーション更新
+        this.engine.instanceManager.update(this.engine.currentTime);
+      }
+    } catch (error) {
+      console.warn('ProjectFileManager: 全体のインスタンス更新に失敗:', error);
+    }
+  }
+
+  /**
+   * V2パラメータデータからテンプレート割り当てを同期
+   */
+  private syncTemplateAssignmentsFromV2Data(parameterData: any): void {
+    if (!parameterData.phrases) return;
+    
+    
+    for (const [phraseId, phraseData] of Object.entries(parameterData.phrases)) {
+      const v2Data = phraseData as any;
+      
+      // フレーズIDの場合のみ処理（非フレーズIDはスキップ）
+      if (phraseId.startsWith('phrase_') && phraseId.split('_').length >= 2) {
+        
+        // 個別設定が有効な場合のみV2データのテンプレートIDを使用
+        if (v2Data.individualSettingEnabled && v2Data.templateId && v2Data.templateId !== '__global__') {
+          const success = this.engine.getTemplateManager().assignTemplate(phraseId, v2Data.templateId);
+        } else {
+          // 個別設定がない場合は、デフォルトテンプレートを使用（V2データは無視）
+          const currentAssignment = this.engine.getTemplateManager().getAssignment(phraseId);
+          if (currentAssignment) {
+            // 既存の割り当てを削除してデフォルトに戻す
+            this.engine.getTemplateManager().unassignTemplate(phraseId);
+          }
+        }
+        
+        // 割り当て確認
+        const assigned = this.engine.getTemplateManager().getAssignment(phraseId);
+        
+      } else {
+        console.warn(`ProjectFileManager: ${phraseId}は非フレーズIDのためスキップ`);
+      }
+    }
+    
+    // 最終的な割り当て状況を確認
+    const assignments = this.engine.getTemplateManager().getAssignments();
+  }
+
+  /**
+   * レガシーparams構造を削除（V2移行後の不整合対策）
+   */
+  private cleanupLegacyParams(lyricsData: LyricsData[]): void {
+    
+    let cleanupCount = 0;
+    
+    for (const phrase of lyricsData) {
+      for (const word of phrase.words) {
+        for (const char of word.chars) {
+          // レガシーparamsプロパティがある場合は削除
+          if ('params' in char) {
+            delete (char as any).params;
+            cleanupCount++;
+          }
+        }
+      }
+    }
+    
+    if (cleanupCount > 0) {
+    }
   }
 }

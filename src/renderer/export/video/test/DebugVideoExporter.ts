@@ -16,7 +16,6 @@ export default class DebugVideoExporter {
   private startTime: number = 0;
   
   constructor(containerId: string) {
-    console.log('DebugVideoExporter: 初期化開始');
     
     // コンテナ要素を取得
     this.container = document.getElementById(containerId) as HTMLElement;
@@ -38,14 +37,12 @@ export default class DebugVideoExporter {
     // デバッググラフィックを描画する
     this.setupDebugGraphics();
     
-    console.log('DebugVideoExporter: 初期化完了');
   }
   
   /**
    * デバッグ用グラフィックのセットアップ
    */
   private setupDebugGraphics(): void {
-    console.log('デバッググラフィックのセットアップ開始');
     this.graphics = new PIXI.Graphics();
     
     // 赤い四角形
@@ -80,14 +77,12 @@ export default class DebugVideoExporter {
     this.app.stage.addChild(this.graphics);
     this.app.stage.addChild(this.text);
     
-    console.log('デバッググラフィックのセットアップ完了');
   }
   
   /**
    * アニメーションを開始（デフォルト3秒）
    */
   private startAnimation(duration: number = 3): void {
-    console.log(`アニメーション開始（${duration}秒）`);
     this.startTime = performance.now();
     
     // アニメーション更新関数
@@ -141,7 +136,6 @@ export default class DebugVideoExporter {
       return;
     }
     
-    console.log('録画開始処理を開始します');
     this.isRecording = true;
     this.chunks = [];
     
@@ -161,7 +155,6 @@ export default class DebugVideoExporter {
       for (const type of mimeTypes) {
         if (MediaRecorder.isTypeSupported(type)) {
           options = { mimeType: type };
-          console.log(`使用するMIMEタイプ: ${type}`);
           break;
         }
       }
@@ -172,7 +165,6 @@ export default class DebugVideoExporter {
       this.mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           this.chunks.push(e.data);
-          console.log(`データチャンク追加: ${e.data.size} バイト`);
         }
       };
       
@@ -180,7 +172,6 @@ export default class DebugVideoExporter {
       
       // 録画開始
       this.mediaRecorder.start(1000); // 1秒ごとにデータを収集
-      console.log('MediaRecorder 開始');
       
       // アニメーション開始（デフォルト3秒）
       this.startAnimation(3);
@@ -202,7 +193,6 @@ export default class DebugVideoExporter {
     }
     
     const durationSec = durationMs / 1000;
-    console.log(`長時間録画開始処理を開始します（${durationSec}秒）`);
     this.isRecording = true;
     this.chunks = [];
     
@@ -222,7 +212,6 @@ export default class DebugVideoExporter {
       for (const type of mimeTypes) {
         if (MediaRecorder.isTypeSupported(type)) {
           options = { mimeType: type };
-          console.log(`使用するMIMEタイプ: ${type}`);
           break;
         }
       }
@@ -233,7 +222,6 @@ export default class DebugVideoExporter {
       this.mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           this.chunks.push(e.data);
-          console.log(`データチャンク追加: ${e.data.size} バイト`);
         }
       };
       
@@ -241,7 +229,6 @@ export default class DebugVideoExporter {
       
       // 録画開始
       this.mediaRecorder.start(1000); // 1秒ごとにデータを収集
-      console.log(`長時間MediaRecorder 開始（${durationSec}秒）`);
       
       // アニメーション開始（指定秒数）
       this.startAnimation(durationSec);
@@ -262,12 +249,10 @@ export default class DebugVideoExporter {
       return;
     }
     
-    console.log('録画停止処理を開始します');
     
     // MediaRecorderのstateを確認して停止
     if (this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
-      console.log('MediaRecorder 停止');
     }
     
     this.isRecording = false;
@@ -277,12 +262,10 @@ export default class DebugVideoExporter {
    * 録画停止時のコールバック
    */
   private onRecordingStop(): void {
-    console.log('録画停止コールバックが呼び出されました');
     
     try {
       // Blob から動画ファイルを作成
       const blob = new Blob(this.chunks, { type: this.mediaRecorder?.mimeType || 'video/webm' });
-      console.log(`動画ブロブ作成完了: ${blob.size} バイト, タイプ: ${blob.type}`);
       
       const url = URL.createObjectURL(blob);
       
@@ -307,12 +290,10 @@ export default class DebugVideoExporter {
    * 長時間録画停止時のコールバック
    */
   private onLongRecordingStop(): void {
-    console.log('長時間録画停止コールバックが呼び出されました');
     
     try {
       // Blob から動画ファイルを作成
       const blob = new Blob(this.chunks, { type: this.mediaRecorder?.mimeType || 'video/webm' });
-      console.log(`長時間動画ブロブ作成完了: ${blob.size} バイト, タイプ: ${blob.type}`);
       
       const url = URL.createObjectURL(blob);
       
@@ -339,9 +320,8 @@ export default class DebugVideoExporter {
   private createDownloadLink(url: string, prefix: string = 'debug'): void {
     // 現在の日時からファイル名を作成
     const date = new Date();
-    const fileName = `visiblyrics_${prefix}_${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}_${date.getHours()}-${date.getMinutes()}-${date.getSeconds()}.webm`;
+    const fileName = `utavista_${prefix}_${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}_${date.getHours()}-${date.getMinutes()}-${date.getSeconds()}.webm`;
     
-    console.log(`動画ファイル名: ${fileName}`);
     
     // ダウンロードリンクを作成して自動的にクリック
     const a = document.createElement('a');
@@ -350,14 +330,12 @@ export default class DebugVideoExporter {
     a.download = fileName;
     document.body.appendChild(a);
     
-    console.log('ダウンロードリンクをクリックします');
     a.click();
     
     // クリーンアップ
     setTimeout(() => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      console.log('ダウンロードリンククリーンアップ完了');
     }, 100);
   }
   
@@ -365,7 +343,6 @@ export default class DebugVideoExporter {
    * リソースを解放する
    */
   public destroy(): void {
-    console.log('DebugVideoExporter: リソース解放開始');
     
     if (this.isRecording) {
       this.stopRecording();
@@ -373,17 +350,14 @@ export default class DebugVideoExporter {
     
     if (this.app) {
       this.app.destroy(true, { children: true, texture: true, baseTexture: true });
-      console.log('PIXI アプリケーション解放完了');
     }
     
     if (this.container && this.container.contains(this.canvas)) {
       this.container.removeChild(this.canvas);
-      console.log('キャンバス要素削除完了');
     }
     
     this.graphics = null;
     this.text = null;
     
-    console.log('DebugVideoExporter: リソース解放完了');
   }
 }

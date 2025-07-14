@@ -7,6 +7,9 @@ import type { FontInfo } from '../shared/types';
 class FontManager {
   private systemFonts: FontInfo[] = [];
   private fontCache: Map<string, FontInfo[]> = new Map();
+  
+  // ファイルサイズ制限 (100MB)
+  private static readonly MAX_FONT_SIZE = 100 * 1024 * 1024;
 
   async initialize() {
     this.setupIPC();
@@ -45,8 +48,8 @@ class FontManager {
       this.systemFonts = this.removeDuplicates(this.systemFonts);
       this.systemFonts.sort((a, b) => a.family.localeCompare(b.family));
       
-      console.log(`Found ${this.systemFonts.length} unique font families (${beforeDedup} total fonts before deduplication)`);
-      console.log('Sample fonts:', this.systemFonts.slice(0, 20).map(f => f.family));
+      console.log(`Found ${this.systemFonts.length} unique font variants (${beforeDedup} total fonts before deduplication)`);
+      console.log('Sample fonts:', this.systemFonts.slice(0, 20).map(f => `${f.family} (${f.weight} ${f.style})`));
     } catch (error) {
       console.error('Error scanning system fonts:', error);
       this.addWebSafeFonts();
@@ -58,6 +61,7 @@ class FontManager {
       case 'darwin': // macOS
         return [
           '/System/Library/Fonts',
+          '/System/Library/Fonts/Supplemental',
           '/Library/Fonts',
           path.join(os.homedir(), 'Library/Fonts'),
           '/System/Library/Assets/com_apple_MobileAsset_Font6'
@@ -103,9 +107,27 @@ class FontManager {
           // Recursively scan subdirectories
           await this.scanFontDirectory(fullPath);
         } else if (this.isFontFile(file.name)) {
-          const fontInfo = this.parseFontFile(file.name, fullPath);
-          if (fontInfo) {
-            this.systemFonts.push(fontInfo);
+          // ファイルサイズチェック
+          try {
+            const stats = await fs.promises.stat(fullPath);
+            if (stats.size > FontManager.MAX_FONT_SIZE) {
+              console.log(`[FontManager] フォントファイルが大きすぎるためスキップ: ${file.name} (${Math.round(stats.size / 1024 / 1024)}MB)`);
+              continue;
+            }
+          } catch (error) {
+            console.debug(`[FontManager] ファイルサイズ取得エラー: ${file.name}`);
+            continue;
+          }
+          
+          // .ttc ファイルの場合、複数のバリアントを生成
+          if (file.name.toLowerCase().endsWith('.ttc')) {
+            const fontInfos = this.parseTTCFile(file.name, fullPath);
+            this.systemFonts.push(...fontInfos);
+          } else {
+            const fontInfo = this.parseFontFile(file.name, fullPath);
+            if (fontInfo) {
+              this.systemFonts.push(fontInfo);
+            }
           }
         }
       }
@@ -219,15 +241,63 @@ class FontManager {
 
   private removeDuplicates(fonts: FontInfo[]): FontInfo[] {
     const seen = new Set<string>();
-    return fonts.filter(font => {
-      // ファミリー名のみで重複排除（大文字小文字を無視）
-      const key = font.family.toLowerCase();
-      if (seen.has(key)) {
-        return false;
+    const uniqueFonts: FontInfo[] = [];
+    
+    // ファミリー名でグループ化
+    const fontGroups = new Map<string, FontInfo[]>();
+    fonts.forEach(font => {
+      const familyKey = font.family.toLowerCase();
+      if (!fontGroups.has(familyKey)) {
+        fontGroups.set(familyKey, []);
       }
-      seen.add(key);
-      return true;
+      fontGroups.get(familyKey)!.push(font);
     });
+    
+    // 各グループから、異なるweight/styleの組み合わせを保持
+    fontGroups.forEach((groupFonts, familyKey) => {
+      const variantsSeen = new Set<string>();
+      
+      groupFonts.forEach(font => {
+        // weight と style の組み合わせでユニークチェック
+        const variantKey = `${font.weight}_${font.style}`;
+        if (!variantsSeen.has(variantKey)) {
+          variantsSeen.add(variantKey);
+          uniqueFonts.push(font);
+        }
+      });
+    });
+    
+    return uniqueFonts;
+  }
+
+  private parseTTCFile(fileName: string, fullPath: string): FontInfo[] {
+    const baseName = path.basename(fileName, '.ttc');
+    const fontInfos: FontInfo[] = [];
+    
+    // TTC ファイルから一般的なバリアントを生成
+    const variants = [
+      { style: 'Regular', weight: 'normal' },
+      { style: 'Bold', weight: 'bold' },
+      { style: 'Italic', weight: 'normal' },
+      { style: 'Bold Italic', weight: 'bold' }
+    ];
+    
+    // ファミリー名を抽出
+    let family = baseName
+      .replace(/[-_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
+    // 少なくともRegularバリアントを追加
+    fontInfos.push({
+      family,
+      fullName: `${baseName}-Regular`,
+      style: 'Regular',
+      weight: 'normal',
+      path: fullPath
+    });
+    
+    return fontInfos;
   }
 
   getFonts(): FontInfo[] {

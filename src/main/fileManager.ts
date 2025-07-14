@@ -7,10 +7,10 @@ import type { ProjectData, MediaFileInfo } from '../shared/types';
 export class FileManager {
   async saveProject(projectData: ProjectData): Promise<string> {
     const { filePath } = await dialog.showSaveDialog({
-      title: 'Save Visiblyrics Project',
-      defaultPath: `${projectData.name || 'project'}.vbl`,
+      title: 'Save UTAVISTA Project',
+      defaultPath: `${projectData.name || 'project'}.uta`,
       filters: [
-        { name: 'Visiblyrics Project', extensions: ['vbl'] },
+        { name: 'UTAVISTA Project', extensions: ['uta'] },
         { name: 'All Files', extensions: ['*'] }
       ]
     });
@@ -34,9 +34,9 @@ export class FileManager {
   
   async loadProject(): Promise<ProjectData> {
     const { filePaths } = await dialog.showOpenDialog({
-      title: 'Load Visiblyrics Project',
+      title: 'Load UTAVISTA Project',
       filters: [
-        { name: 'Visiblyrics Project', extensions: ['vbl'] },
+        { name: 'UTAVISTA Project', extensions: ['uta', 'vbl'] },
         { name: 'All Files', extensions: ['*'] }
       ],
       properties: ['openFile']
@@ -52,7 +52,7 @@ export class FileManager {
         if (!projectFileData.metadata && !projectFileData.version) {
           console.warn('Project file missing metadata, applying defaults');
           projectFileData.metadata = {
-            projectName: path.basename(filePaths[0], '.vbl'),
+            projectName: path.basename(filePaths[0], path.extname(filePaths[0])),
             createdAt: new Date().toISOString(),
             modifiedAt: new Date().toISOString()
           };
@@ -66,7 +66,7 @@ export class FileManager {
         // ProjectData形式に変換（互換性のため）
         const projectData: ProjectData = {
           id: `project_${Date.now()}`,
-          name: projectFileData.metadata?.projectName || path.basename(filePaths[0], '.vbl'),
+          name: projectFileData.metadata?.projectName || path.basename(filePaths[0], path.extname(filePaths[0])),
           ...projectFileData
         };
         
@@ -137,6 +137,79 @@ export class FileManager {
     // For now, return undefined - can be implemented later with FFmpeg
     return undefined;
   }
+  
+  async checkFileExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
+   * @deprecated Electronネイティブではファイルパスを直接使用してください
+   * この関数は後方互換性のためにのみ残されています
+   */
+  async readFileAsURL(filePath: string): Promise<string> {
+    console.warn('readFileAsURL is deprecated. Use file paths directly in Electron.');
+    try {
+      // 正規化されたファイルパスを返す（URLではなく）
+      const normalizedPath = path.resolve(filePath);
+      return normalizedPath;
+    } catch (error) {
+      console.error('Failed to normalize file path:', error);
+      throw error;
+    }
+  }
+  
+  // テンプレートレジストリ関連のメソッド
+  async readTemplateRegistry(): Promise<string> {
+    try {
+      const registryPath = path.join(process.cwd(), 'src/renderer/templates/registry/templates.json');
+      const content = await fs.readFile(registryPath, 'utf-8');
+      return content;
+    } catch (error) {
+      console.error('Failed to read template registry:', error);
+      throw error;
+    }
+  }
+  
+  async writeTemplateRegistry(content: string): Promise<void> {
+    try {
+      const registryPath = path.join(process.cwd(), 'src/renderer/templates/registry/templates.json');
+      await fs.writeFile(registryPath, content, 'utf-8');
+    } catch (error) {
+      console.error('Failed to write template registry:', error);
+      throw error;
+    }
+  }
+  
+  async readTemplateFile(fileName: string): Promise<string> {
+    try {
+      const templatePath = path.join(process.cwd(), 'src/renderer/templates', fileName);
+      const content = await fs.readFile(templatePath, 'utf-8');
+      return content;
+    } catch (error) {
+      console.error(`Failed to read template file ${fileName}:`, error);
+      throw error;
+    }
+  }
+  
+  async listTemplateFiles(): Promise<string[]> {
+    try {
+      const templateDir = path.join(process.cwd(), 'src/renderer/templates');
+      const files = await fs.readdir(templateDir);
+      return files.filter(file => 
+        file.endsWith('.ts') && 
+        file !== 'index.ts' && 
+        !file.includes('.d.ts')
+      );
+    } catch (error) {
+      console.error('Failed to list template files:', error);
+      throw error;
+    }
+  }
 }
 
 export function setupFileHandlers() {
@@ -165,6 +238,62 @@ export function setupFileHandlers() {
       return await fileManager.selectMediaFile(type);
     } catch (error) {
       console.error(`Failed to select ${type} file:`, error);
+      throw error;
+    }
+  });
+  
+  ipcMain.handle('fs:check-file-exists', async (event, filePath: string) => {
+    try {
+      return await fileManager.checkFileExists(filePath);
+    } catch (error) {
+      console.error('Failed to check file existence:', error);
+      return false;
+    }
+  });
+  
+  ipcMain.handle('fs:read-file-as-url', async (event, filePath: string) => {
+    try {
+      return await fileManager.readFileAsURL(filePath);
+    } catch (error) {
+      console.error('Failed to read file as URL:', error);
+      throw error;
+    }
+  });
+  
+  // テンプレートレジストリ関連のハンドラ
+  ipcMain.handle('template:read-registry', async () => {
+    try {
+      return await fileManager.readTemplateRegistry();
+    } catch (error) {
+      console.error('Failed to read template registry:', error);
+      throw error;
+    }
+  });
+  
+  ipcMain.handle('template:write-registry', async (event, content: string) => {
+    try {
+      await fileManager.writeTemplateRegistry(content);
+      return true;
+    } catch (error) {
+      console.error('Failed to write template registry:', error);
+      throw error;
+    }
+  });
+  
+  ipcMain.handle('template:read-file', async (event, fileName: string) => {
+    try {
+      return await fileManager.readTemplateFile(fileName);
+    } catch (error) {
+      console.error(`Failed to read template file ${fileName}:`, error);
+      throw error;
+    }
+  });
+  
+  ipcMain.handle('template:list-files', async () => {
+    try {
+      return await fileManager.listTemplateFiles();
+    } catch (error) {
+      console.error('Failed to list template files:', error);
       throw error;
     }
   });

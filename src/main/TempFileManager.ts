@@ -67,7 +67,7 @@ export class TempFileManager {
   
   constructor() {
     // システムテンポラリディレクトリにアプリ専用フォルダを作成
-    this.baseDir = path.join(os.tmpdir(), 'visiblyrics-export-sessions');
+    this.baseDir = path.join(os.tmpdir(), 'utavista-export-sessions');
     this.initializeBaseDirAndCleanup();
   }
   

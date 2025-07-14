@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { IAnimationTemplate, HierarchyType, AnimationPhase, TemplateMetadata } from '../types/types';
 import { FontService } from '../services/FontService';
+import { TextStyleFactory } from '../utils/TextStyleFactory';
 
 /**
  * 多角形を描画するためのユーティリティ関数
@@ -483,7 +484,6 @@ export const GlitchText: IAnimationTemplate = {
     
     // デバッグログ（開発時のみ）
     if (process.env.NODE_ENV === 'development') {
-      console.log(`[GlitchText Debug] enableGlitch: ${enableGlitch}, isActive: ${isActive}, shouldApplyGlitch: ${shouldApplyGlitch}`);
     }
     
     if (shouldApplyGlitch && text && text.trim() !== '') {
@@ -683,15 +683,11 @@ export const GlitchText: IAnimationTemplate = {
     
     try {
       // ベーステキストを作成（パラメータから色を取得）
-      const baseTextStyle = new PIXI.TextStyle({
+      const baseText = TextStyleFactory.createHighDPIText(text, {
         fontFamily: fontFamily,
         fontSize: fontSize,
-        fill: params.inactiveColor || '#FFFFFF', // パラメータから色を取得
-        align: 'center',
-        fontWeight: 'normal'
+        fill: params.inactiveColor || '#FFFFFF' // パラメータから色を取得
       });
-      
-      const baseText = new PIXI.Text(text, baseTextStyle);
       baseText.anchor.set(0.5, 0.5);
       
       // テキストのサイズを取得

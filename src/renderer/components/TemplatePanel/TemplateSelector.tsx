@@ -22,7 +22,6 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
     const templateExists = templates.some(template => template.id === selectedTemplateId);
     if (!templateExists && templates.length > 0) {
       // 存在しない場合は最初のテンプレートを選択
-      console.log(`選択されたテンプレートID "${selectedTemplateId}" は存在しません。最初のテンプレートを選択します。`);
       onSelect(templates[0].id);
     }
   }, [selectedTemplateId, templates, onSelect]);

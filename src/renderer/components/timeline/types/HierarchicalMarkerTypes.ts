@@ -18,6 +18,7 @@ export interface HierarchicalMarkerProps {
   level: MarkerLevel;
   duration: number;
   timelineWidth: number;
+  msPerPixel?: number;          // 時間からピクセルへの変換率
   parentConstraints?: MarkerConstraints;
   onUpdate?: (updatedUnit: any) => void;
   onMultiUpdate?: (operationType: 'move' | 'resizeLeft' | 'resizeRight', markerId: string, deltaMs: number, level: MarkerLevel) => void;
@@ -28,6 +29,7 @@ export interface HierarchicalMarkerProps {
   isRightOuterMarker?: boolean;  // 複数選択時の右端マーカーかどうか
   children?: React.ReactNode;
   onDragStart?: (unitId: string, operationType: string) => void;
+  isActivated?: boolean;         // 明示的にアクティブ化されているかどうか
 }
 
 // ドラッグ状態

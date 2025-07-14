@@ -36,7 +36,21 @@ const MusicPanel: React.FC<MusicPanelProps> = ({ engine }) => {
             log.info(`音楽ファイル復元成功、エンジンに設定: ${fileName} (元: ${originalFileName})`);
             engine.loadAudioElement(audio, fileName);
             setFileName(fileName);
-            log.debug(`音楽ファイル復元完了: ${fileName}`);
+            
+            // 音楽読み込み完了イベントを発火（復元時も新規読み込みと同様に処理）
+            setTimeout(() => {
+              log.debug(`音楽ファイル復元完了イベントを発火: ${fileName}`);
+              const actualFilePath = electronMediaManager.getCurrentAudioFilePath();
+              const audioLoadEvent = new CustomEvent('music-file-loaded', {
+                detail: { 
+                  filePath: actualFilePath,
+                  fileName,
+                  timestamp: Date.now()
+                }
+              });
+              window.dispatchEvent(audioLoadEvent);
+              log.debug(`音楽ファイル復元完了: ${fileName}`);
+            }, 50);
           } else {
             log.warn(`音楽ファイル復元失敗 - result: ${result ? '存在' : 'なし'}, engine: ${engine ? '存在' : 'なし'}`);
           }
@@ -49,13 +63,34 @@ const MusicPanel: React.FC<MusicPanelProps> = ({ engine }) => {
       }
     };
 
-    window.addEventListener('visiblyrics:restore-audio-file', handleAudioRestore as EventListener);
+    window.addEventListener('utavista:restore-audio-file', handleAudioRestore as EventListener);
     
     return () => {
       log.debug('音楽ファイル復元イベントリスナーを削除');
-      window.removeEventListener('visiblyrics:restore-audio-file', handleAudioRestore as EventListener);
+      window.removeEventListener('utavista:restore-audio-file', handleAudioRestore as EventListener);
     };
   }, [engine]);
+
+  // 音楽ファイル読み込み完了イベントのリスナー（復元時のUI状態更新用）
+  useEffect(() => {
+    const log = logger.module('MusicPanel');
+    log.debug('音楽ファイル読み込み完了イベントリスナーを設定');
+    
+    const handleMusicLoaded = (event: CustomEvent) => {
+      const { fileName: loadedFileName, isRestored } = event.detail;
+      if (isRestored && loadedFileName) {
+        log.debug(`音楽ファイル復元完了を受信、UI状態を更新: ${loadedFileName}`);
+        setFileName(loadedFileName);
+      }
+    };
+
+    window.addEventListener('music-file-loaded', handleMusicLoaded as EventListener);
+    
+    return () => {
+      log.debug('音楽ファイル読み込み完了イベントリスナーを削除');
+      window.removeEventListener('music-file-loaded', handleMusicLoaded as EventListener);
+    };
+  }, []);
 
   // 最近使用したファイルを読み込み（コンポーネント表示時とengine変更時）
   useEffect(() => {
@@ -131,10 +166,13 @@ const MusicPanel: React.FC<MusicPanelProps> = ({ engine }) => {
                 // 音楽読み込み完了イベントを発火
                 setTimeout(() => {
                   log.debug(`[${clickTimestamp}] 音楽読み込み完了イベントを発火`);
-                  const actualFileURL = electronMediaManager.getCurrentAudioFileURL();
+                  const actualFilePath = electronMediaManager.getCurrentAudioFilePath();
+                    filePath: actualFilePath,
+                    fileName: fileName
+                  });
                   const audioLoadEvent = new CustomEvent('music-file-loaded', {
                     detail: { 
-                      url: actualFileURL || 'electron://loaded',
+                      filePath: actualFilePath,
                       fileName,
                       timestamp: clickTimestamp
                     }
@@ -199,10 +237,10 @@ const MusicPanel: React.FC<MusicPanelProps> = ({ engine }) => {
                     
                     // 音楽読み込み完了イベントを発火
                     setTimeout(() => {
-                      const actualFileURL = electronMediaManager.getCurrentAudioFileURL();
+                      const actualFilePath = electronMediaManager.getCurrentAudioFilePath();
                       const audioLoadEvent = new CustomEvent('music-file-loaded', {
                         detail: { 
-                          url: actualFileURL || 'electron://loaded',
+                          filePath: actualFilePath,
                           fileName,
                           timestamp: clickTimestamp
                         }

@@ -3,6 +3,7 @@ import { IAnimationTemplate, HierarchyType, AnimationPhase } from '../types/type
 
 export class AnimationInstance {
   id: string;
+  objectId: string; // ParameterManager 連携用のプロパティ
   template: IAnimationTemplate;
   text: string;
   x: number;
@@ -39,6 +40,7 @@ export class AnimationInstance {
     hierarchyType: HierarchyType = 'char' // デフォルトは文字レベル
   ) {
     this.id = id;
+    this.objectId = id; // ParameterManager 用に objectId を設定
     this.template = template;
     this.text = text;
     this.x = x;
@@ -92,13 +94,7 @@ export class AnimationInstance {
 
   // スロットルされたログ出力関数
   private throttledLog(message: string) {
-    const now = Date.now();
-    // フレーズレベルのみログ出力するか、一定時間経過したときのみログ出力
-    if (this.hierarchyType === 'phrase' || 
-        now - AnimationInstance.lastLogTime > AnimationInstance.LOG_THROTTLE_MS) {
-      console.log(message);
-      AnimationInstance.lastLogTime = now;
-    }
+    // ログ出力を無効化
   }
 
   update(nowMs: number) {
@@ -119,7 +115,6 @@ export class AnimationInstance {
         // 文字コンテナの名前が設定されているか確認
         if (!(this.container as any).name || !(this.container as any).name.includes('char_container_')) {
           (this.container as any).name = `char_container_${this.id}`;
-          console.log(`文字コンテナの名前を再設定: ${(this.container as any).name}`);
         }
       }
       
@@ -138,6 +133,7 @@ export class AnimationInstance {
       
       // 現在のアニメーションフェーズを判定
       const phase = this.determineAnimationPhase(nowMs);
+      
       
       // 子要素のコンテナ状態は維持したまま、このコンテナの変形のみを処理
       try {
@@ -172,6 +168,7 @@ export class AnimationInstance {
           console.error(`エラー: テンプレート ${this.template.constructor?.name || 'Unknown'} はアニメーションメソッドを実装していません`);
           this.showErrorMessage();
         }
+        
         
         // 重要: 変換行列を明示的に更新
         if (this.container) {

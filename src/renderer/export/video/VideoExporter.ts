@@ -8,6 +8,7 @@
 import { Engine } from '../../engine/Engine';
 import { ResolutionManager } from './ResolutionManager';
 import { getElectronAPI } from '../../../shared/electronAPI';
+import { electronMediaManager } from '../../services/ElectronMediaManager';
 import type { AspectRatio, Orientation, VideoQuality, CustomResolution } from '../../types/types';
 
 // Legacy compatibility types
@@ -58,6 +59,7 @@ export class VideoExporter {
   private resolutionManager: ResolutionManager;
   private electronAPI: any;
   private isExporting: boolean = false;
+  private isCancelled: boolean = false;
   private sessionId: string | null = null;
   private progressCallback?: (progress: ExportProgress) => void;
   
@@ -91,6 +93,7 @@ export class VideoExporter {
     
     
     this.isExporting = true;
+    this.isCancelled = false;
     this.progressCallback = progressCallback;
     this.sessionId = crypto.randomUUID();
     
@@ -113,6 +116,9 @@ export class VideoExporter {
         totalFrames,
         message: 'セッションを初期化中...'
       });
+      
+      // RenderTexturePoolを初期化
+      this.engine.initializeExportResources(width, height);
       
       // エレクトロンメインプロセスにセッション開始を通知
       const tempSessionDir = await this.electronAPI.createTempSession(this.sessionId);
@@ -144,9 +150,16 @@ export class VideoExporter {
       
     } catch (error) {
       console.error('Seek and Snap export failed:', error);
+      // キャンセルによるエラーの場合は、より分かりやすいメッセージにする
+      if (this.isCancelled) {
+        throw new Error('Export was cancelled by user');
+      }
       throw error;
     } finally {
+      // RenderTexturePoolをクリーンアップ
+      this.engine.cleanupExportResources();
       this.isExporting = false;
+      this.isCancelled = false;
       this.sessionId = null;
     }
   }
@@ -171,7 +184,7 @@ export class VideoExporter {
     // 順次処理でフレームをキャプチャ（キャンセル時の即座停止のため）
     for (let frame = 0; frame < totalFrames; frame++) {
       // キャンセルチェック
-      if (!this.isExporting) {
+      if (!this.isExporting || this.isCancelled) {
         throw new Error('Export cancelled');
       }
       
@@ -194,7 +207,7 @@ export class VideoExporter {
     await this.frameProcessingSemaphore.acquire();
     
     try {
-      if (!this.isExporting) {
+      if (!this.isExporting || this.isCancelled) {
         throw new Error('Export cancelled');
       }
       
@@ -228,11 +241,20 @@ export class VideoExporter {
         throw new Error(`Frame data size mismatch for frame ${frame}: expected ${expectedSize}, got ${frameData.length}`);
       }
       
+      // キャンセルチェック（画像保存前）
+      if (!this.isExporting || this.isCancelled) {
+        throw new Error('Export cancelled');
+      }
+
       // システムテンポラリフォルダに画像保存（堅牢なPNG出力）
       const framePath = `frame_${frame.toString().padStart(6, '0')}.png`;
       try {
         await this.electronAPI.saveFrameImage(this.sessionId, framePath, frameData, width, height);
       } catch (pngError) {
+        // キャンセル時のファイル保存エラーは抑制
+        if (this.isCancelled) {
+          throw new Error('Export cancelled');
+        }
         console.error(`PNG conversion failed for frame ${frame + 1}:`, pngError);
         throw new Error(`PNG conversion failed for frame ${frame + 1}: ${pngError instanceof Error ? pngError.message : 'Unknown PNG error'}`);
       }
@@ -284,7 +306,7 @@ export class VideoExporter {
     const batchVideos: string[] = [];
     
     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-      if (!this.isExporting) {
+      if (!this.isExporting || this.isCancelled) {
         throw new Error('Export cancelled');
       }
       
@@ -343,11 +365,22 @@ export class VideoExporter {
       message: '最終動画を結合中...'
     });
     
+    // 音声ファイルのパスを取得（音楽を含める場合のみ）
+    let audioPath: string | undefined;
+    if (options.includeMusicTrack) {
+      const currentAudioURL = electronMediaManager.getCurrentAudioFilePath();
+      if (currentAudioURL) {
+        // ElectronMediaManager.getCurrentAudioFilePath() already returns the file path
+        audioPath = currentAudioURL;
+      }
+    }
+
     const finalVideoPath = await this.electronAPI.composeFinalVideo({
       sessionId: this.sessionId,
       batchVideos,
       fileName: options.fileName,
       includeMusicTrack: options.includeMusicTrack || false,
+      audioPath,
       outputPath: options.outputPath // フルパスを追加
     });
     
@@ -463,12 +496,16 @@ export class VideoExporter {
    */
   async cancelExport(): Promise<void> {
     if (this.isExporting) {
-      console.log('Cancelling Seek and Snap export');
+      this.isCancelled = true;
       this.isExporting = false;
       
       // セッションクリーンアップ
       if (this.sessionId) {
-        await this.electronAPI.cleanupTempSession(this.sessionId);
+        try {
+          await this.electronAPI.cleanupTempSession(this.sessionId);
+        } catch (error) {
+          console.warn('Failed to cleanup temp session during cancellation:', error);
+        }
         this.sessionId = null;
       }
     }

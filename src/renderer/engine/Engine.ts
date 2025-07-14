@@ -4,15 +4,19 @@ import { PhraseUnit, CharUnit, WordUnit, LyricsData, AspectRatio, Orientation, S
 import { IAnimationTemplate } from '../types/types';
 import { VideoExporter } from '../export/video/VideoExporter';
 import { Howl } from 'howler';
-import { ParamService } from '../services/ParamService';
 import { GridOverlay } from '../utils/GridOverlay';
 import { DebugManager } from '../utils/debug';
 import { TemplateManager } from './TemplateManager';
-import { ParameterManager } from './ParameterManager';
+import { ParameterManagerV2 } from './ParameterManagerV2';
 import { ProjectStateManager } from './ProjectStateManager';
 import { calculateStageSize, getDefaultStageConfig } from '../utils/stageCalculator';
 import { persistenceService } from '../services/PersistenceService';
 import { calculateCharacterIndices } from '../utils/characterIndexCalculator';
+import { RenderTexturePool } from './RenderTexturePool';
+import { StandardParameters } from '../types/StandardParameters';
+import { ParameterValidator } from '../utils/ParameterValidator';
+import { UnifiedRestoreManager } from './UnifiedRestoreManager';
+import { ProjectFileData, AutoSaveData } from '../../types/UnifiedProjectData';
 
 export class Engine {
   // パラメータカテゴリ分類
@@ -33,12 +37,9 @@ export class Engine {
   lastUpdateTime: number = 0;
   private updateFn: (delta: number) => void;
   
-  // パラメータ管理サービス（後方互換性のため残す）
-  private paramService: ParamService;
-  
   // 複数テンプレート対応のためのマネージャークラス
   templateManager: TemplateManager;
-  parameterManager: ParameterManager;
+  parameterManager: ParameterManagerV2; // V2専用
   projectStateManager: ProjectStateManager;
   
   // テンプレート
@@ -47,7 +48,7 @@ export class Engine {
   // 音声関連のプロパティ
   audioPlayer?: Howl;
   audioDuration: number = 10000; // デフォルト10秒
-  audioURL?: string;
+  audioFilePath?: string; // 音楽ファイルパス
   audioFileName?: string; // 音楽ファイル名
 
   // 方眼目盛りと座標表示用のオーバーレイ
@@ -58,6 +59,12 @@ export class Engine {
   
   // 動画エクスポーター
   videoExporter: VideoExporter;
+  
+  // RenderTextureプール（メモリ効率化）
+  private renderTexturePool?: RenderTexturePool;
+  
+  // 統一復元マネージャー
+  private unifiedRestoreManager: UnifiedRestoreManager;
   
   // ステージ設定
   private stageConfig: StageConfig;
@@ -81,11 +88,14 @@ export class Engine {
   private autoSaveEnabled: boolean = true;
   private static readonly AUTO_SAVE_INTERVAL = 30000; // 30秒
   private static readonly AUTO_SAVE_EXPIRY = 24 * 60 * 60 * 1000; // 24時間
+  
+  // リサイズハンドラーの参照（メモリリーク防止）
+  private boundHandleResize: () => void;
 
   constructor(
     containerId: string, 
     template: IAnimationTemplate,
-    defaultParams: Record<string, any> = {},
+    defaultParams: Partial<StandardParameters> = {},
     templateId: string = 'fadeslidetext'
   ) {
     // テンプレートの保存
@@ -95,9 +105,10 @@ export class Engine {
     this.templateManager = new TemplateManager();
     this.templateManager.registerTemplate(templateId, template, {name: templateId}, true);
     
-    this.parameterManager = new ParameterManager();
-    this.parameterManager.setTemplateDefaultParams(templateId, defaultParams);
-    this.parameterManager.updateGlobalParams(defaultParams);
+    // ParameterManagerV2の初期化（V2専用）
+    this.parameterManager = new ParameterManagerV2();
+    this.parameterManager.setTemplateManager(this.templateManager); // TemplateManager参照を設定
+    this.parameterManager.updateGlobalDefaults(defaultParams);
     
     // プロジェクト状態マネージャーの初期化
     this.projectStateManager = new ProjectStateManager({
@@ -110,12 +121,9 @@ export class Engine {
       defaultTemplateId: templateId
     });
     
-    // パラメータサービスの初期化（後方互換性のため）
-    this.paramService = new ParamService(defaultParams);
     
     // ステージ設定の初期化（まずはデフォルト値で開始）
     this.stageConfig = getDefaultStageConfig();
-    console.log('Engine: デフォルトステージ設定で初期化:', this.stageConfig);
     
     // コンテナの取得
     this.canvasContainer = document.getElementById(containerId) as HTMLElement;
@@ -135,9 +143,13 @@ export class Engine {
       antialias: true,
     });
 
+    // PIXIアプリケーションの初期化完了を待つ
+    if (this.app.init) {
+      // PIXI v8対応: awaitする必要がある場合
+    }
+
     // グローバル参照として保存（テンプレートからアクセスできるように）
     (window as any).__PIXI_APP__ = this.app;
-    console.log('PIXIアプリケーションをグローバルにセットしました');
 
     // PIXIキャンバスをDOMに追加
     this.canvasContainer.innerHTML = ''; // 既存の内容をクリア
@@ -154,12 +166,32 @@ export class Engine {
     // インスタンスマネージャーの初期化
     this.instanceManager = new InstanceManager(this.app, template, defaultParams);
     
-    // インスタンスマネージャーにテンプレートマネージャーとパラメータマネージャーを設定
-    this.instanceManager.updateTemplateAssignments(this.templateManager, this.parameterManager);
+    // インスタンスマネージャーにV2パラメータマネージャーを設定
+    this.instanceManager.setParameterManagerV2(this.parameterManager);
+    
+    // V2変更リスナーを設定
+    this.parameterManager.addChangeListener('engine', (phraseId, params) => {
+      if (import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
+      }
+      
+      // レンダリング更新をトリガー
+      if (this.instanceManager) {
+        this.instanceManager.updateExistingInstances();
+        this.instanceManager.update(this.currentTime);
+      }
+    });
+    
+    // 統一復元マネージャーの初期化
+    this.unifiedRestoreManager = new UnifiedRestoreManager(
+      this,
+      this.parameterManager,
+      this.projectStateManager,
+      this.templateManager,
+      this.instanceManager
+    );
 
     // ステージの原点を明示的に設定 (左上を(0, 0)にする)
     this.app.stage.position.set(0, 0);
-    console.log(`ステージ位置を設定: (${this.app.stage.position.x}, ${this.app.stage.position.y})`);
 
     // 方眼目盛りオーバーレイを初期化
     this.gridOverlay = new GridOverlay(this.app);
@@ -175,8 +207,9 @@ export class Engine {
     // 動画エクスポーターを初期化
     this.videoExporter = new VideoExporter(this);
 
-    // ウィンドウリサイズイベントの処理
-    window.addEventListener('resize', this.handleResize.bind(this));
+    // ウィンドウリサイズイベントの処理（メモリリーク防止のためbind済み参照を保存）
+    this.boundHandleResize = this.handleResize.bind(this);
+    window.addEventListener('resize', this.boundHandleResize);
     
     // updateFn をプロパティに保存して、ticker.remove 時に参照できるようにする
     this.updateFn = this.update.bind(this);
@@ -186,32 +219,47 @@ export class Engine {
     this.app.ticker.start();
 
     // デバッグ出力
-    console.log(`Canvas size: ${this.app.renderer.width}x${this.app.renderer.height}`);
     
     // 自動保存機能を初期化
     this.setupAutoSave();
     
-    // 起動時に自動保存データの復元を試みる（少し遅延させて確実にIPCが準備されるようにする）
+    // 起動時に自動保存データの復元を試みる（PIXI初期化後に実行）
     setTimeout(async () => {
       try {
-        console.log('Engine: ===== 自動保存データ確認開始 =====');
+        // PIXIアプリケーションの初期化が完了するまで待機
+        await this.waitForPixiInitialization();
         
         // まずステージ設定だけを先に適用
         await this.initializeStageConfigFromAutoSave();
         
-        // その後、通常の復元確認処理を実行
-        await this.checkAndPromptAutoRestore();
+        // 自動復元を実行（ダイアログなし）
+        await this.silentAutoRestore();
         
-        console.log('Engine: ===== 自動保存データ確認完了 =====');
       } catch (error) {
         console.error('Engine: 自動保存データの確認でエラーが発生しました:', error);
       }
     }, 100);
   }
 
+  // PIXIアプリケーションの初期化完了を待機
+  private async waitForPixiInitialization(): Promise<void> {
+    let attempts = 0;
+    const maxAttempts = 50; // 最大5秒待機
+    
+    while (attempts < maxAttempts) {
+      if (this.app && this.app.screen && this.app.screen.width > 0 && this.app.screen.height > 0) {
+        return;
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
+    }
+    
+    console.warn('Engine: PIXI初期化の完了を確認できませんでした');
+  }
+
   // 歌詞データをロード (PhraseUnit[] を受け入れる)
   loadLyrics(data: PhraseUnit[]) {
-    console.log('Engine: 歌詞データのロード開始', data);
     
     // まず各オブジェクトに固有のIDが付与されているか確認し、なければ設定する
     const dataWithIds = this.ensureUniqueIds(data);
@@ -224,11 +272,18 @@ export class Engine {
     
     this.charPositions.clear();
 
-    // パラメータサービスにフレーズデータをセット
-    this.paramService.setPhrases(this.phrases);
     
     // 既存の文字タイミングを保持するため、再計算は行わない
 
+    // V2: 各フレーズをParameterManagerV2に初期化
+    this.phrases.forEach(phrase => {
+      if (!this.parameterManager.isPhraseInitialized(phrase.id)) {
+        const templateId = this.templateManager.getTemplateForObject(phrase.id).constructor.name || 
+                          this.templateManager.getDefaultTemplateId();
+        this.parameterManager.initializePhrase(phrase.id, templateId);
+      }
+    });
+    
     // ステージ上に歌詞配置を初期化
     this.arrangeCharsOnStage();
     
@@ -243,7 +298,6 @@ export class Engine {
     
     // フレーズコンテナの位置設定はテンプレート側に任せる
     // 強制位置設定のコードを削除
-    console.log(`Engine: 歌詞データのロード完了 - ${this.phrases.length}個のフレーズを処理`);
     
     // 歌詞データロード後に自動保存
     if (this.autoSaveEnabled) {
@@ -296,23 +350,19 @@ export class Engine {
     if (this.audioPlayer) {
       const state = this.audioPlayer.state();
       const duration = this.audioPlayer.duration ? this.audioPlayer.duration() : 0;
-      console.log(`Engine: 音楽データ状態確認 - state: ${state}, duration: ${duration}秒, audioPlayer存在: ${!!this.audioPlayer}`);
       
       if (this.audioPlayer.duration && duration > 0) {
         musicMaxTime = duration * 1000; // ミリ秒に変換
       }
-    } else {
-      console.log('Engine: audioPlayerが存在しません');
     }
     
     // 歌詞データと音楽データの長い方を選択
     const maxTime = Math.max(lyricsMaxTime, musicMaxTime);
     
-    // 最大時間にバッファ（2秒）を追加して設定
+    // 最大時間にバッファ（0.2秒）を追加して設定
     // ただし、最小でも10秒は確保する
-    this.audioDuration = Math.max(maxTime + 2000, 10000);
+    this.audioDuration = Math.max(maxTime + 200, 10000);
     
-    console.log(`Engine: タイムライン長さ計算完了: ${this.audioDuration}ms (歌詞: ${lyricsMaxTime}ms, 音楽: ${musicMaxTime}ms)`);
   }
   
   // 文字カウント情報を追加する
@@ -336,7 +386,7 @@ export class Engine {
   /**
    * パラメータ変更が文字配置に影響するかを判定
    */
-  private isLayoutAffectingChange(params: Record<string, any>): boolean {
+  private isLayoutAffectingChange(params: Partial<StandardParameters>): boolean {
     return Object.keys(params).some(key => Engine.LAYOUT_AFFECTING_PARAMS.has(key));
   }
 
@@ -444,10 +494,20 @@ export class Engine {
   }
 
   arrangeCharsOnStage() {
-    console.log('Engine: arrangeCharsOnStage開始', { 
-      phrasesCount: this.phrases.length,
-      screenSize: { width: this.app.screen.width, height: this.app.screen.height }
-    });
+    // PIXIアプリケーションが初期化されているかチェック
+    if (!this.app || !this.app.screen) {
+      console.error('Engine: PIXIアプリケーションが初期化されていません。arrangeCharsOnStageをスキップします。');
+      return;
+    }
+    
+    // 画面サイズが有効かチェック
+    if (!this.app.screen.width || !this.app.screen.height || this.app.screen.width <= 0 || this.app.screen.height <= 0) {
+      console.error('Engine: 無効な画面サイズが検出されました。arrangeCharsOnStageをスキップします。', {
+        width: this.app.screen.width,
+        height: this.app.screen.height
+      });
+      return;
+    }
     
     const centerX = this.app.screen.width / 2;
     const centerY = this.app.screen.height / 2;
@@ -545,7 +605,6 @@ export class Engine {
             y: phraseY + wordOffsetY + charOffsetY
           });
           
-          // console.log(`Char position [${char.id}]: ${charX + charWidth / 2}, ${phraseY}, "${char.char}", width: ${charWidth}`);
           
           // 次の文字のために位置を更新
           charX += charWidth + wordLetterSpacing;
@@ -555,35 +614,26 @@ export class Engine {
         currentX += wordWidths[wordIndex] + letterSpacing * 3; // 単語間のスペース
       });
     });
-    
-    console.log('Engine: arrangeCharsOnStage完了', { 
-      charPositionsSize: this.charPositions.size 
-    });
   }
 
   // ウィンドウリサイズハンドラ
   private handleResize() {
     try {
-      const width = this.canvasContainer.clientWidth || 800;
-      const height = this.canvasContainer.clientHeight || 400;
       
-  
+      // PIXIレンダラーのサイズは変更せず、CSSスケーリングのみ更新
+      // これにより二重スケーリング問題を回避
+      this.applyCSSScaling();
       
-      // キャンバスサイズの更新
-      if (this.app && this.app.renderer) {
-        this.app.renderer.resize(width, height);
-        
-        // 歌詞配置の再調整
-        this.arrangeCharsOnStage();
-        
-        // インスタンス位置を更新
-        if (this.instanceManager) {
-          this.instanceManager.updatePositions(this.charPositions);
-        
-          // 現在の時間で更新
-          this.instanceManager.update(this.currentTime);
-        }
+      // 歌詞配置の再調整（座標系は元のまま維持）
+      this.arrangeCharsOnStage();
+      
+      // インスタンス位置を更新
+      if (this.instanceManager) {
+        this.instanceManager.updatePositions(this.charPositions);
+        // 現在の時間で更新
+        this.instanceManager.update(this.currentTime);
       }
+      
     } catch (error) {
       console.error(`Resize error: ${error}`);
     }
@@ -593,13 +643,46 @@ export class Engine {
   private update(delta: number) {
     if (!this.isRunning) return;
     
-    // 擬似的な時間進行（実際のアプリでは音楽と同期させる）
-    const now = performance.now();
-    const elapsed = now - this.lastUpdateTime;
+    // 音楽プレイヤーの現在再生位置を直接参照して同期
+    let newTime = this.currentTime;
+    
+    if (this.audioPlayer && this.audioPlayer.state() === 'loaded') {
+      // 音楽が読み込まれている場合は音楽の再生位置を参照
+      try {
+        const audioCurrentTime = this.audioPlayer.seek() * 1000; // ミリ秒に変換
+        if (typeof audioCurrentTime === 'number' && !isNaN(audioCurrentTime)) {
+          newTime = audioCurrentTime;
+        }
+      } catch (error) {
+        // 音楽プレイヤーからの時間取得に失敗した場合は独立した時間進行にフォールバック
+        const now = performance.now();
+        const elapsed = now - this.lastUpdateTime;
+        if (elapsed > 16 || this.lastUpdateTime === 0) {
+          newTime = this.currentTime + (elapsed || this.app.ticker.deltaMS);
+        }
+      }
+    } else {
+      // 音楽が読み込まれていない場合は独立した時間進行
+      const now = performance.now();
+      const elapsed = now - this.lastUpdateTime;
+      if (elapsed > 16 || this.lastUpdateTime === 0) {
+        newTime = this.currentTime + (elapsed || this.app.ticker.deltaMS);
+      }
+    }
     
     // 前回の更新から16ms以上経過している場合のみ更新（約60FPS）
+    const now = performance.now();
+    const elapsed = now - this.lastUpdateTime;
     if (elapsed > 16 || this.lastUpdateTime === 0) {
-      this.currentTime += elapsed || this.app.ticker.deltaMS;
+      // 終了時刻チェック - タイムライン終端で自動停止
+      if (newTime >= this.audioDuration) {
+        this.currentTime = this.audioDuration;
+        this.pause();
+        this.dispatchCustomEvent('timeline-ended', { endTime: this.audioDuration });
+        return;
+      }
+      
+      this.currentTime = newTime;
       this.lastUpdateTime = now;
       
       // インスタンスマネージャーの更新
@@ -614,11 +697,10 @@ export class Engine {
   play() {
     this.isRunning = true;
     this.lastUpdateTime = performance.now();
-    console.log("再生開始: " + this.currentTime + "ms");
+    console.log('[Engine] 再生開始');
     
     // 音声がある場合は再生
     if (this.audioPlayer && this.audioPlayer.state() === 'loaded') {
-      console.log(`Engine: 音楽再生開始 - ${this.audioFileName}, シーク位置: ${this.currentTime / 1000}秒`);
       this.audioPlayer.seek(this.currentTime / 1000); // 秒単位に変換
       this.audioPlayer.play();
     } else {
@@ -635,7 +717,7 @@ export class Engine {
 
   pause() {
     this.isRunning = false;
-    console.log("一時停止: " + this.currentTime + "ms");
+    console.log('[Engine] 再生停止');
     
     // 音声がある場合は一時停止
     if (this.audioPlayer) {
@@ -652,7 +734,6 @@ export class Engine {
     this.currentTime = 0;
     this.lastUpdateTime = 0;
     this.instanceManager.update(this.currentTime);
-    console.log("リセット");
     
     // 音声がある場合はシーク
     if (this.audioPlayer) {
@@ -672,27 +753,17 @@ export class Engine {
    */
   async seek(timeMs: number): Promise<void> {
     const seekTimestamp = Date.now();
-    console.log(`[${seekTimestamp}] Engine: ===== Engine.seek開始（統一シーク処理） =====`);
-    console.log(`[${seekTimestamp}] Engine: Seek to ${timeMs}ms`);
-    console.log(`[${seekTimestamp}] Engine: 現在のthis.currentTime: ${this.currentTime}ms`);
-    console.log(`[${seekTimestamp}] Engine: this.isRunning: ${this.isRunning}`);
     
     this.currentTime = timeMs;
     this.lastUpdateTime = performance.now();
-    console.log(`[${seekTimestamp}] Engine: this.currentTime更新完了: ${this.currentTime}ms`);
     
-    console.log(`[${seekTimestamp}] Engine: instanceManager.update実行開始`);
     this.instanceManager.update(this.currentTime);
-    console.log(`[${seekTimestamp}] Engine: instanceManager.update実行完了`);
     
     // 音声がある場合は再生中でなくてもシークを実行
     if (this.audioPlayer) {
-      console.log(`[${seekTimestamp}] Engine: audioPlayer.seek実行開始: ${timeMs / 1000}秒`);
       // 一時停止中でも音声の位置を更新
       this.audioPlayer.seek(timeMs / 1000); // 秒単位に変換
-      console.log(`[${seekTimestamp}] Engine: audioPlayer.seek実行完了`);
     } else {
-      console.log(`[${seekTimestamp}] Engine: audioPlayerが存在しないため音声シークをスキップ`);
     }
     
     // 背景動画がある場合はシーク
@@ -701,12 +772,9 @@ export class Engine {
     }
     
     // シーク操作後にタイムライン更新イベントを発火
-    console.log(`[${seekTimestamp}] Engine: dispatchTimelineUpdatedEvent実行開始`);
     this.dispatchTimelineUpdatedEvent();
-    console.log(`[${seekTimestamp}] Engine: dispatchTimelineUpdatedEvent実行完了`);
     
     // シークイベントを発火
-    console.log(`[${seekTimestamp}] Engine: engine-seekedイベント発火開始`);
     const seekEvent = new CustomEvent('engine-seeked', {
       detail: {
         currentTime: timeMs,
@@ -716,12 +784,10 @@ export class Engine {
       }
     });
     window.dispatchEvent(seekEvent);
-    console.log(`[${seekTimestamp}] Engine: engine-seekedイベント発火完了`);
     
     // プレビュー機能と動画エクスポートで統一の待機処理
     return new Promise<void>((resolve) => {
       requestAnimationFrame(() => {
-        console.log(`[${seekTimestamp}] Engine: ===== Engine.seek完了（統一シーク処理） =====`);
         resolve();
       });
     });
@@ -733,7 +799,6 @@ export class Engine {
    */
   async seekToExactTime(timeMs: number): Promise<void> {
     try {
-      console.log(`Engine: Seeking to exact time ${timeMs}ms for video export`);
       
       // 時間を設定
       this.currentTime = timeMs;
@@ -748,7 +813,6 @@ export class Engine {
       // 強制的にレンダリングを実行して状態を安定化
       this.app.render();
       
-      console.log(`Engine: Exact seek completed to ${timeMs}ms`);
       
     } catch (error) {
       console.error(`Engine: Error in seekToExactTime to ${timeMs}ms:`, error);
@@ -757,8 +821,7 @@ export class Engine {
   }
 
   // テンプレートの更新（歌詞データを保持）
-  updateTemplate(template: IAnimationTemplate, params: Record<string, any> = {}) {
-    console.log('Engine: updateTemplateが呼び出されました', params);
+  updateTemplate(template: IAnimationTemplate, params: Partial<StandardParameters> = {}) {
     this.template = template; // templateプロパティを更新
     this.instanceManager.updateTemplate(template, params);
     
@@ -770,9 +833,8 @@ export class Engine {
   }
   
   // テンプレートのみを変更（歌詞データを保持）
-  changeTemplate(template: IAnimationTemplate, params: Record<string, any> = {}, templateId?: string): boolean {
+  changeTemplate(template: IAnimationTemplate, params: Partial<StandardParameters> = {}, templateId?: string): boolean {
     try {
-      console.log('Engine: changeTemplateが呼び出されました - 歌詞データを保持したままテンプレートを変更');
       
       // 現在の歌詞データと状態を保持
       const currentLyrics = JSON.parse(JSON.stringify(this.phrases)); // ディープコピー
@@ -798,14 +860,11 @@ export class Engine {
       
       // テンプレートマネージャーを更新
       this.templateManager.registerTemplate(actualTemplateId, template, {name: actualTemplateId}, true);
-      this.parameterManager.setTemplateDefaultParams(actualTemplateId, mergedParams);
-      this.parameterManager.updateGlobalParams(mergedParams);
+      this.parameterManager.updateGlobalDefaults(mergedParams);
       
       // メインテンプレートを更新
       this.template = template;
       
-      // パラメータサービスも更新（後方互換性のため）
-      this.paramService.updateParams('global', null, mergedParams);
       
       // インスタンスマネージャーのテンプレートを更新（歌詞データの再読み込みは行わない）
       this.instanceManager.updateTemplate(template, mergedParams);
@@ -819,7 +878,6 @@ export class Engine {
         this.lastUpdateTime = performance.now();
       }
       
-      console.log('Engine: テンプレート変更完了 - 歌詞データと再生状態を保持');
       return true;
     } catch (error) {
       console.error('Engine: テンプレート変更エラー:', error);
@@ -829,7 +887,6 @@ export class Engine {
 
   // タイムライン関連データ取得用メソッド
   getTimelineData() {
-    console.log('Engine: getTimelineData 呼び出し - 現在の歌詞データ:', this.phrases);
     return {
       lyrics: this.phrases,
       duration: this.audioDuration
@@ -838,64 +895,75 @@ export class Engine {
   
   // マーカー操作の結果を反映するメソッド（Undo対応）
   updateLyricsData(updatedLyrics: PhraseUnit[], saveState: boolean = true, changeType: string = '歌詞タイミング変更') {
-    console.log('Engine: updateLyricsData呼び出し開始', { 
-      changeType, 
-      phrasesCount: updatedLyrics.length,
-      currentTime: this.currentTime 
-    });
-    
     // 状態保存（Undo操作時はスキップ）
     if (saveState) {
-      // 変更前の状態を保存
+      // 変更前の状態を保存（V2形式）
+      const v2Export = this.parameterManager.exportCompressed();
       this.projectStateManager.updateCurrentState({
         lyricsData: JSON.parse(JSON.stringify(this.phrases)), // 現在の歌詞データを保存
         currentTime: this.currentTime,
         templateAssignments: this.templateManager.exportAssignments(),
-        globalParams: this.parameterManager.getGlobalParams(),
-        objectParams: this.parameterManager.exportParameters().objects || {},
+        parameterData: v2Export, // V2データを保存
         defaultTemplateId: this.templateManager.getDefaultTemplateId()
       });
       this.projectStateManager.saveBeforeLyricsChange(changeType);
     }
     
-    // 文字インデックスを計算してから更新
+    // 文字インデックスを計算してから更新（一度だけ実行）
     this.phrases = calculateCharacterIndices(updatedLyrics);
-    console.log('Engine: 歌詞データ更新完了（文字インデックス再計算済み）、位置再計算開始');
     
-    // 更新された歌詞データでインスタンスマネージャーを更新
-    this.charPositions.clear();
-    this.arrangeCharsOnStage(); // 位置情報を再計算
-    console.log('Engine: 位置計算完了、インスタンス再読み込み開始');
+    // V2: 新しいフレーズをパラメータマネージャーで初期化
+    this.phrases.forEach(phrase => {
+      const templateId = this.templateManager.getAssignment(phrase.id) || this.templateManager.getDefaultTemplateId();
+      if (!this.parameterManager.isPhraseInitialized(phrase.id)) {
+        if (import.meta.env.DEV && Math.random() < 0.1) { // 10%の確率でのみ出力
+        }
+        this.parameterManager.initializePhrase(phrase.id, templateId);
+      }
+    });
     
-    this.instanceManager.loadPhrases(this.phrases, this.charPositions);
-    console.log('Engine: インスタンス読み込み完了、アニメーション更新開始');
+    // 変更タイプに応じた最適化処理
+    if (changeType === '単語分割編集') {
+      // 単語分割の場合は文字位置が変わるため完全な再構築が必要
+      this.charPositions.clear();
+      this.arrangeCharsOnStage();
+      this.instanceManager.loadPhrases(this.phrases, this.charPositions);
+    } else {
+      // デフォルトの全体更新（タイミング変更も含む）
+      this.charPositions.clear();
+      this.arrangeCharsOnStage();
+      this.instanceManager.loadPhrases(this.phrases, this.charPositions);
+    }
     
     // 現在の時間位置でアニメーションを更新
     this.instanceManager.update(this.currentTime);
-    console.log('Engine: アニメーション更新完了、イベント発火');
     
     // タイムライン更新イベント発火
     this.dispatchTimelineUpdatedEvent();
     
     // 新しい歌詞データをProjectStateManagerの現在状態に反映
-    console.log('Engine: ProjectStateManagerに新しい歌詞データを反映');
+    const paramExport = this.parameterManager.exportCompressed();
     this.projectStateManager.updateCurrentState({
-      lyricsData: JSON.parse(JSON.stringify(this.phrases))
+      lyricsData: JSON.parse(JSON.stringify(this.phrases)),
+      individualSettingsEnabled: paramExport.individualSettingsEnabled || []
     });
-    console.log('Engine: updateLyricsData処理完了');
+    
+    // V2パラメータ管理では同期不要
     
     return this.phrases;
   }
 
   // オブジェクト固有のパラメータを設定
-  updateObjectParams(objectId: string, type: 'phrase' | 'word' | 'char' | 'global', params: Record<string, any>) {
+  updateObjectParams(objectId: string, type: 'phrase' | 'word' | 'char' | 'global', params: Partial<StandardParameters>) {
     try {
-      console.log('Engine: updateObjectParamsが呼び出されました', type, objectId, params);
-      // パラメータサービスを使用してパラメータを更新
-      this.paramService.updateParams(type, objectId, params);
+      if (import.meta.env.DEV && Math.random() < 0.05) { // 5%の確率でのみ出力
+      }
       
-      // パラメータマネージャーにも個別パラメータを更新
+      // parameterManagerに統一
       this.parameterManager.updateObjectParams(objectId, params);
+      
+      // 強制パラメータ同期を実行
+      this.parameterManager.forceSynchronizeParameters();
       
       // ① デフォルト＋オブジェクトパラメータを反映
       if (!this.template || !this.instanceManager) {
@@ -905,19 +973,22 @@ export class Engine {
       
       if (type === 'global') {
         // グローバルパラメータのみを更新
-        this.instanceManager.updateTemplate(this.template, this.paramService.getGlobalParams());
+        const globalParams = this.parameterManager.getGlobalDefaults();
+        this.instanceManager.updateTemplate(this.template, globalParams);
       } else {
-        // オブジェクト固有のパラメータマージの場合は、グローバルパラメータもマージする
-        this.instanceManager.updateTemplate(this.template, {
-          ...this.paramService.getGlobalParams(),
-          ...this.paramService.getObjectParams(type as 'phrase' | 'word' | 'char', objectId)
-        });
+        // オブジェクト固有のパラメータ更新の場合は、ParameterManagerに更新を委譲
+        // パラメータを渡さずにupdateTemplateを呼び出し、InstanceManagerが自動的に
+        // ParameterManagerから最新のeffectiveParamsを取得するようにする
+        this.instanceManager.updateTemplate(this.template);
       }
       
       // ② パラメータ変更に応じた更新処理
       const isLayoutChange = this.isLayoutAffectingChange(params);
       
+      // レイアウト変更判定（ログ削除済み）
+      
       if (isLayoutChange) {
+        // レイアウト変更パラメータ処理
         // 文字配置に影響するパラメータ変更時のみ座標を再計算
         this.recalculateCharPositionsOnly();
         // CSS スケーリングも更新
@@ -925,12 +996,22 @@ export class Engine {
         // インスタンスを完全再構築
         this.instanceManager.loadPhrases(this.phrases, this.charPositions);
       } else {
+        if (import.meta.env.DEV && Math.random() < 0.05) { // 5%の確率でのみ出力
+        }
         // 配置に影響しないパラメータ変更時は既存インスタンスを更新のみ
         this.instanceManager.updateExistingInstances();
       }
       
       // 現在の時間位置でアニメーションを更新
       this.instanceManager.update(this.currentTime);
+      
+      // リアルタイム反映のため強制レンダリング
+      if (this.instanceManager) {
+        this.instanceManager.updateExistingInstances();
+        this.instanceManager.update(this.currentTime);
+      }
+      
+      // V2パラメータ管理では同期不要
       
       // タイムライン更新イベント発火
       this.dispatchTimelineUpdatedEvent();
@@ -941,11 +1022,13 @@ export class Engine {
       return false;
     }
   }
+
   
   // グローバルパラメータを更新（Undo対応）
-  updateGlobalParams(params: Record<string, any>, saveState: boolean = true) {
+  updateGlobalParams(params: Partial<StandardParameters>, saveState: boolean = true) {
     try {
-      console.log('Engine: updateGlobalParamsが呼び出されました', params);
+      if (import.meta.env.DEV && Math.random() < 0.1) { // 10%の確率でのみ出力
+      }
       
       // 状態保存（Undo操作時はスキップ）
       if (saveState) {
@@ -953,22 +1036,24 @@ export class Engine {
           lyricsData: JSON.parse(JSON.stringify(this.phrases)),
           currentTime: this.currentTime,
           templateAssignments: this.templateManager.exportAssignments(),
-          globalParams: this.parameterManager.getGlobalParams(),
-          objectParams: this.parameterManager.exportParameters().objects || {},
-          defaultTemplateId: this.templateManager.getDefaultTemplateId()
+          globalParams: this.parameterManager.getGlobalDefaults(),
+          objectParams: this.parameterManager.exportCompressed().phrases || {},
+          defaultTemplateId: this.templateManager.getDefaultTemplateId(),
+          individualSettingsEnabled: [] // V2では個別設定の概念がない
         });
         this.projectStateManager.saveBeforeParameterChange('グローバルパラメータ');
       }
       
-      // パラメータサービスを使用してグローバルパラメータを更新
-      this.paramService.updateParams('global', null, params);
+      // parameterManagerに統一
+      this.parameterManager.updateGlobalDefaults(params);
       
-      // パラメータマネージャーも更新
-      this.parameterManager.updateGlobalParams(params);
+      // 強制パラメータ同期を実行
+      this.parameterManager.forceSynchronizeParameters();
       
-      // ① デフォルトパラメータを更新
+      // ① デフォルトパラメータを更新（parameterManagerから取得）
       if (this.template && this.instanceManager) {
-        this.instanceManager.updateTemplate(this.template, this.paramService.getGlobalParams());
+        const globalParams = this.parameterManager.getGlobalDefaults();
+        this.instanceManager.updateTemplate(this.template, globalParams);
       } else {
         console.error('Engine: templateまたはinstanceManagerがnull/undefinedです');
         return false;
@@ -978,12 +1063,20 @@ export class Engine {
       const isLayoutChange = this.isLayoutAffectingChange(params);
       
       if (isLayoutChange) {
+        if (import.meta.env.DEV && Math.random() < 0.1) { // 10%の確率でのみ出力
+        }
+        // レイアウト変更時、アクティブ化されたオブジェクトのパラメータを保持
+        const activatedObjectParams = this.preserveIndividualSettingObjectParams();
+        
         // 文字配置に影響するパラメータ変更時のみ座標を再計算
         this.recalculateCharPositionsOnly();
         // CSS スケーリングも更新
         this.applyCSSScaling();
         // インスタンスを完全再構築
         this.instanceManager.loadPhrases(this.phrases, this.charPositions);
+        
+        // アクティブ化されたオブジェクトのパラメータを復元
+        this.restoreIndividualSettingObjectParams(activatedObjectParams);
       } else {
         // 配置に影響しないパラメータ変更時は既存インスタンスを更新のみ
         this.instanceManager.updateExistingInstances();
@@ -991,6 +1084,12 @@ export class Engine {
       
       // 現在の時間位置でアニメーションを更新
       this.instanceManager.update(this.currentTime);
+      
+      // リアルタイム反映のため強制レンダリング
+      if (this.instanceManager) {
+        this.instanceManager.updateExistingInstances();
+        this.instanceManager.update(this.currentTime);
+      }
       
       // タイムライン更新イベント発火
       this.dispatchTimelineUpdatedEvent();
@@ -1005,7 +1104,6 @@ export class Engine {
   // 選択されたオブジェクトの個別パラメータをクリア
   clearSelectedObjectParams(objectIds: string[]): boolean {
     try {
-      console.log('Engine: clearSelectedObjectParamsが呼び出されました', objectIds);
       
       // パラメータマネージャーで個別パラメータをクリア
       this.parameterManager.clearMultipleObjectParams(objectIds);
@@ -1030,8 +1128,6 @@ export class Engine {
         }
         
         if (type) {
-          // パラメータサービスをリセット（グローバルパラメータのみ適用）
-          this.paramService.updateParams(type, id, {});
         }
       });
       
@@ -1049,7 +1145,18 @@ export class Engine {
       // タイムライン更新イベント発火
       this.dispatchTimelineUpdatedEvent();
       
-      console.log(`Engine: ${objectIds.length}個のオブジェクトの個別パラメータとテンプレート割り当てをクリアしました`);
+      // テンプレート割り当て変更後の状態更新
+      const paramExport = this.parameterManager.exportCompressed();
+      this.projectStateManager.updateCurrentState({
+        lyricsData: JSON.parse(JSON.stringify(this.phrases)),
+        currentTime: this.currentTime,
+        templateAssignments: this.templateManager.exportAssignments(),
+        globalParams: this.parameterManager.getGlobalDefaults(),
+        objectParams: paramExport.objects || {},
+        individualSettingsEnabled: paramExport.individualSettingsEnabled || [],
+        defaultTemplateId: this.templateManager.getDefaultTemplateId()
+      });
+      
       return true;
     } catch (error) {
       console.error('Engine: clearSelectedObjectParamsの処理中にエラーが発生しました', error);
@@ -1057,23 +1164,64 @@ export class Engine {
     }
   }
 
+  // 全ての個別オブジェクトパラメータとアクティベーション状態を強制クリア
+  forceCleanAllObjectData(): boolean {
+    try {
+      
+      // パラメータマネージャーで全データクリア
+      this.parameterManager.forceCleanAllObjectData();
+      
+      // テンプレートマネージャーで全ての個別テンプレート割り当てをクリア
+      this.templateManager.clearAllAssignments();
+      
+        const globalParams = this.parameterManager.getGlobalDefaults();
+      
+      // インスタンスマネージャーを完全に再構築
+      if (this.template && this.instanceManager) {
+        // 全ての文字位置を再計算
+        this.charPositions.clear();
+        this.arrangeCharsOnStage();
+        
+        // インスタンスを再読み込み
+        this.instanceManager.loadPhrases(this.phrases, this.charPositions);
+        
+        // 現在の時間位置でアニメーションを更新
+        this.instanceManager.update(this.currentTime);
+      }
+      
+      // タイムライン更新イベント発火
+      this.dispatchTimelineUpdatedEvent();
+      
+      // アクティベーション状態変更イベント発火
+      const event = new CustomEvent('objects-deactivated', {
+        detail: {
+          objectIds: [],
+          objectType: 'all'
+        }
+      });
+      window.dispatchEvent(event);
+      
+      return true;
+    } catch (error) {
+      console.error('Engine: forceCleanAllObjectDataの処理中にエラーが発生しました', error);
+      return false;
+    }
+  }
+
   // 音声ファイル読み込み用メソッド
-  loadAudioURL(url: string, fileName?: string) {
-    console.log('Engine: 音声ファイル読み込み:', url, fileName);
-    console.log('Engine: 背景動画の状態:', this.backgroundVideo ? `存在 (muted: ${this.backgroundVideo.muted})` : '存在しない');
+  loadAudioFilePath(filePath: string, fileName?: string) {
     
     // Howlerで音声を読み込む（フォーマットを明示的に指定）
-    this.audioURL = url;
+    this.audioFilePath = filePath;
     this.audioFileName = fileName;
     this.audioPlayer = new Howl({
-      src: [url],
+      src: [filePath],
       format: ['mp3', 'wav', 'ogg', 'm4a'], // フォーマットを明示的に指定
       html5: true,
       preload: true,
       onload: () => {
         if (this.audioPlayer) {
           const audioDuration = this.audioPlayer.duration() * 1000; // ミリ秒に変換
-          console.log(`Engine: 音声ロード完了: 長さ ${audioDuration}ms`);
           
           // 歌詞データと音楽データの両方を考慮してタイムライン長さを再計算
           this.calculateAndSetAudioDuration();
@@ -1087,7 +1235,6 @@ export class Engine {
           // タイムライン更新イベントを発火
           this.dispatchTimelineUpdatedEvent();
           
-          console.log('Engine: 音声ファイルの読み込みが完了しました。再生可能です。');
           
           // 音声ファイルロード後に自動保存
           if (this.autoSaveEnabled) {
@@ -1101,6 +1248,13 @@ export class Engine {
          if (error === 'No codec support for selected audio sources.') {
            console.error('Engine: このファイル形式はサポートされていません。MP3、WAV、OGGファイルを使用してください。');
          }
+       },
+       onend: () => {
+         this.pause();
+         this.dispatchCustomEvent('audio-ended', { 
+           currentTime: this.currentTime,
+           audioFileName: this.audioFileName 
+         });
        }
     });
   }
@@ -1109,8 +1263,6 @@ export class Engine {
    * HTMLAudioElement/HTMLVideoElementから音声を読み込み（Electron用）
    */
   loadAudioElement(audioElement: HTMLAudioElement | HTMLVideoElement, fileName?: string) {
-    console.log('Engine: HTMLAudioElement/HTMLVideoElementから音声読み込み:', fileName);
-    console.log('Engine: 背景動画の状態:', this.backgroundVideo ? `存在 (muted: ${this.backgroundVideo.muted})` : '存在しない');
     
     // AudioElementからHowlを作成
     this.audioFileName = fileName || 'electron-audio';
@@ -1122,7 +1274,6 @@ export class Engine {
       onload: () => {
         if (this.audioPlayer) {
           const audioDuration = this.audioPlayer.duration() * 1000; // ミリ秒に変換
-          console.log(`Engine: HTMLAudioElement音声ロード完了: 長さ ${audioDuration}ms`);
           
           // 歌詞データと音楽データの両方を考慮してタイムライン長さを再計算
           this.calculateAndSetAudioDuration();
@@ -1136,7 +1287,6 @@ export class Engine {
           // タイムライン更新イベントを発火
           this.dispatchTimelineUpdatedEvent();
           
-          console.log('Engine: HTMLAudioElement音声ファイルの読み込みが完了しました。再生可能です。');
           
           // 音声ファイルロード後に自動保存
           if (this.autoSaveEnabled) {
@@ -1146,21 +1296,22 @@ export class Engine {
        },
        onloaderror: (id: number, error: unknown) => {
          console.error(`Engine: HTMLAudioElement音声ロードエラー (ID: ${id}):`, error);
+       },
+       onend: () => {
+         this.pause();
+         this.dispatchCustomEvent('audio-ended', { 
+           currentTime: this.currentTime,
+           audioFileName: this.audioFileName 
+         });
        }
     });
     
-    console.log('Engine: Howlerのonloadコールバック待機中...');
   }
   
   // タイムライン更新イベントを発火
   public dispatchTimelineUpdatedEvent() {
     // タイムラインイベントログを制限
     try {
-      console.log('Engine: timeline-updatedイベント発火開始', {
-        phrasesCount: this.phrases.length,
-        currentTime: this.currentTime
-      });
-      
       const event = new CustomEvent('timeline-updated', {
         detail: { 
           lyrics: JSON.parse(JSON.stringify(this.phrases)), // ディープコピーで確実に新しいオブジェクトを渡す
@@ -1168,7 +1319,6 @@ export class Engine {
         }
       });
       window.dispatchEvent(event);
-      console.log('Engine: timeline-updatedイベント発火完了');
       
       // マーカー関連データが更新されたのでアニメーションも更新
       this.instanceManager.update(this.currentTime);
@@ -1186,8 +1336,8 @@ export class Engine {
         clearInterval(this.autoSaveTimer);
       }
       
-      // リサイズイベントリスナーを削除
-      window.removeEventListener('resize', this.handleResize.bind(this));
+      // リサイズイベントリスナーを削除（正しい参照を使用）
+      window.removeEventListener('resize', this.boundHandleResize);
       
       // インスタンスマネージャーをクリーンアップ
       if (this.instanceManager) {
@@ -1233,17 +1383,28 @@ export class Engine {
     id: string,
     template: IAnimationTemplate,
     config: { name: string, description?: string, thumbnailUrl?: string } = {},
-    defaultParams: Record<string, any> = {},
+    defaultParams: Partial<StandardParameters> = {},
     isDefault: boolean = false
   ): boolean {
     try {
+      // テンプレートが既に登録されているかチェック
+      const isAlreadyRegistered = this.templateManager.isTemplateRegistered(id);
+      
       this.templateManager.registerTemplate(id, template, config, isDefault);
-      this.parameterManager.setTemplateDefaultParams(id, defaultParams);
+      
+      // 既に登録されている場合は、グローバルデフォルトを更新しない
+      // 初回登録時のみ、テンプレートのデフォルト値を適用
+      if (!isAlreadyRegistered && Object.keys(defaultParams).length > 0) {
+        this.parameterManager.updateGlobalDefaults(defaultParams);
+      }
       
       // もしデフォルトテンプレートとして設定された場合
       if (isDefault) {
         this.template = template;
-        this.updateGlobalParams(defaultParams);
+        // 既に登録されている場合は、パラメータを更新しない
+        if (!isAlreadyRegistered) {
+          this.updateGlobalParams(defaultParams);
+        }
       }
       
       return true;
@@ -1296,19 +1457,15 @@ export class Engine {
     forceReapply: boolean = false
   ): boolean {
     try {
-      console.log(`Engine: テンプレート割り当て開始 - ${objectId} -> ${templateId} (forceReapply: ${forceReapply})`);
       
       // 現在のテンプレートID取得
       const currentTemplateId = this.getCurrentTemplateId(objectId);
-      console.log(`現在のテンプレートID: ${currentTemplateId}`);
       
       // 同じテンプレートの場合の処理
       if (currentTemplateId === templateId) {
         if (!forceReapply) {
-          console.log(`Engine: 同じテンプレートのため割り当てをスキップ`);
           return true;
         } else {
-          console.log(`Engine: 同じテンプレートですが、forceReapply=trueのため再更新を実行`);
           // テンプレート割り当てはスキップするが、インスタンス更新は実行する
           this.performInstanceUpdate(objectId, templateId);
           return true;
@@ -1321,8 +1478,8 @@ export class Engine {
           lyricsData: JSON.parse(JSON.stringify(this.phrases)),
           currentTime: this.currentTime,
           templateAssignments: this.templateManager.exportAssignments(),
-          globalParams: this.parameterManager.getGlobalParams(),
-          objectParams: this.parameterManager.exportParameters().objects || {},
+          globalParams: this.parameterManager.getGlobalDefaults(),
+          objectParams: this.parameterManager.exportCompressed().phrases || {},
           defaultTemplateId: this.templateManager.getDefaultTemplateId()
         });
         this.projectStateManager.saveBeforeTemplateChange(objectId, currentTemplateId);
@@ -1330,7 +1487,6 @@ export class Engine {
       
       // パラメータ保持処理
       if (preserveParams) {
-        console.log(`パラメータ保持処理実行: ${currentTemplateId} -> ${templateId}`);
         this.parameterManager.handleTemplateChange(
           currentTemplateId,
           templateId,
@@ -1341,12 +1497,24 @@ export class Engine {
       
       // テンプレート割り当て
       const result = this.templateManager.assignTemplate(objectId, templateId);
-      console.log(`テンプレート割り当て結果: ${result}`);
       
       if (result) {
         // 統合されたインスタンス更新処理
         this.performInstanceUpdate(objectId, templateId);
-        console.log(`Engine: テンプレート割り当て完了`);
+        
+        // テンプレート割り当て成功後の状態更新
+        if (saveState) {
+          const paramExport = this.parameterManager.exportCompressed();
+          this.projectStateManager.updateCurrentState({
+            lyricsData: JSON.parse(JSON.stringify(this.phrases)),
+            currentTime: this.currentTime,
+            templateAssignments: this.templateManager.exportAssignments(),
+            globalParams: this.parameterManager.getGlobalDefaults(),
+            objectParams: paramExport.objects || {},
+            individualSettingsEnabled: paramExport.individualSettingsEnabled || [],
+            defaultTemplateId: this.templateManager.getDefaultTemplateId()
+          });
+        }
       } else {
         console.error(`テンプレート割り当てに失敗しました`);
       }
@@ -1360,20 +1528,19 @@ export class Engine {
   
   // フレーズIDかどうかを判定するヘルパー
   private isPhraseId(id: string): boolean {
-    return id.startsWith('phrase_') && id.split('_').length === 2;
+    // フレーズIDの形式: phrase_X または phrase_timestamp_randomString
+    return id.startsWith('phrase_') && id.split('_').length >= 2;
   }
 
   // 統合されたインスタンス更新処理
   private performInstanceUpdate(objectId: string, templateId: string): void {
-    console.log(`インスタンス更新処理開始: ${objectId} -> ${templateId}`);
     
     try {
       // インスタンスマネージャーにテンプレートマネージャーの最新情報を設定
-      this.instanceManager.updateTemplateAssignments(this.templateManager, this.parameterManager);
+      this.instanceManager.updateTemplateAssignments(this.templateManager);
       
       if (this.isPhraseId(objectId)) {
         // フレーズレベルの場合は完全再構築
-        console.log(`フレーズレベル更新 - 完全再構築処理`);
         const targetPhrase = this.phrases.find(p => p.id === objectId);
         if (targetPhrase) {
           this.reconstructSpecificPhrase(targetPhrase);
@@ -1383,7 +1550,6 @@ export class Engine {
         }
       } else {
         // 非フレーズレベルの場合は部分更新
-        console.log(`非フレーズレベル更新 - 部分更新処理`);
         this.instanceManager.updateInstanceAndChildren(objectId);
       }
       
@@ -1393,7 +1559,6 @@ export class Engine {
       // タイムライン更新イベントを発火
       this.dispatchTimelineUpdatedEvent();
       
-      console.log(`インスタンス更新処理完了: ${objectId}`);
     } catch (error) {
       console.error(`インスタンス更新処理エラー: ${objectId}`, error);
     }
@@ -1427,6 +1592,9 @@ export class Engine {
       // デフォルトテンプレートを設定
       const result = this.templateManager.setDefaultTemplateId(templateId);
       if (result) {
+        // ParameterManagerV2のデフォルトテンプレートIDも同期
+        this.parameterManager.setDefaultTemplateId(templateId);
+        
         // メインテンプレートも更新
         const template = this.templateManager.getTemplateById(templateId);
         if (template) {
@@ -1435,8 +1603,7 @@ export class Engine {
         
         // インスタンスマネージャーの更新 - 影響を受ける全インスタンスを更新
         this.instanceManager.updateTemplateAssignments(
-          this.templateManager, 
-          this.parameterManager
+          this.templateManager
         );
       }
       
@@ -1499,7 +1666,6 @@ export class Engine {
   // 特定フレーズの完全再構築（タイミング情報保持）
   private reconstructSpecificPhrase(phrase: PhraseUnit): void {
     try {
-      console.log(`特定フレーズ再構築開始: ${phrase.id}`);
       
       // フレーズの文字位置情報を再計算
       this.recalculateCharPositionsForPhrase(phrase);
@@ -1508,7 +1674,6 @@ export class Engine {
       // 将来的には特定フレーズのみの再構築メソッドをInstanceManagerに実装
       this.instanceManager.loadPhrases(this.phrases, this.charPositions);
       
-      console.log(`特定フレーズ再構築完了: ${phrase.id}`);
     } catch (error) {
       console.error(`特定フレーズ再構築エラー: ${phrase.id}`, error);
     }
@@ -1516,7 +1681,6 @@ export class Engine {
   
   // 特定フレーズの文字位置を再計算
   private recalculateCharPositionsForPhrase(phrase: PhraseUnit): void {
-    console.log(`フレーズ文字位置再計算: ${phrase.id}`);
     
     // 該当フレーズの文字位置のみを削除
     phrase.words.forEach(word => {
@@ -1531,11 +1695,9 @@ export class Engine {
   
   // 特定オブジェクトのインスタンスを更新（改善版）
   private updateObjectInstance(objectId: string): void {
-    console.log(`Engine: オブジェクトインスタンス更新 - ${objectId}`);
-    
     try {
       // インスタンスマネージャーにテンプレートマネージャーの最新情報を設定
-      this.instanceManager.updateTemplateAssignments(this.templateManager, this.parameterManager);
+      this.instanceManager.updateTemplateAssignments(this.templateManager);
       
       // 階層的な更新を実行
       this.instanceManager.updateInstanceAndChildren(objectId);
@@ -1543,27 +1705,38 @@ export class Engine {
       // 現在時刻で再描画
       this.instanceManager.update(this.currentTime);
       
-      console.log(`オブジェクトインスタンス更新完了: ${objectId}`);
     } catch (error) {
       console.error(`オブジェクトインスタンス更新エラー: ${objectId}`, error);
     }
   }
   
-  // プロジェクト保存
+  /**
+   * 外部から個別オブジェクトインスタンスの更新を実行（公開メソッド）
+   */
+  public forceUpdateObjectInstance(objectId: string): void {
+    this.updateObjectInstance(objectId);
+  }
+  
+  /**
+   * 自動復元時専用：個別設定を保護しながらテンプレートを復元
+   */
+  
+  // プロジェクト保存（V2専用）
   saveProject(): any {
+    // V2形式でパラメータをエクスポート
+    const v2Export = this.parameterManager.exportCompressed();
+    
     return {
-      name: 'Visiblyrics Project',
-      version: '1.0.0',
+      name: 'UTAVISTA Project',
+      version: '2.0.0', // V2形式
       timestamp: Date.now(),
       defaultTemplateId: this.templateManager.getDefaultTemplateId(),
       templates: Object.fromEntries(
         this.templateManager.getAllTemplates().map(({id, config}) => [id, config])
       ),
       templateAssignments: this.templateManager.exportAssignments(),
-      globalParams: this.parameterManager.getGlobalParams(),
-      objectParams: Object.fromEntries(
-        Array.from(this.parameterManager.exportParameters().objects || {})
-      ),
+      // V2パラメータデータ
+      parameterData: v2Export,
       lyrics: this.phrases
     };
   }
@@ -1573,6 +1746,33 @@ export class Engine {
     this.currentTime = timeMs;
     this.instanceManager.update(timeMs);
   }
+
+  // ProjectStateManagerへのアクセサ
+  getProjectStateManager(): ProjectStateManager {
+    return this.projectStateManager;
+  }
+
+  // TemplateManagerへのアクセサ
+  getTemplateManager() {
+    return this.templateManager;
+  }
+
+  // インスタンスの強制再生成
+  forceRecreateInstances(): void {
+    // 全インスタンスをクリアして再生成
+    this.instanceManager.clearAllInstances();
+    
+    // 現在のフレーズデータで再生成
+    if (this.phrases && this.phrases.length > 0) {
+      this.instanceManager.initialize(this.phrases);
+      
+      // テンプレート割り当てを更新
+      this.instanceManager.updateTemplateAssignments(this.templateManager);
+      
+      // 現在時刻で更新
+      this.instanceManager.update(this.currentTime);
+    }
+  }
   
   /**
    * 動画出力用のスケーリングを設定
@@ -1580,7 +1780,6 @@ export class Engine {
    * @param scale スケール係数
    */
   setOutputScale(scale: number): void {
-    console.log(`Engine: 出力スケーリング設定 (${scale})`);    
     
     // スケールが1の場合はリセット処理
     if (scale === 1.0) {
@@ -1599,7 +1798,6 @@ export class Engine {
    * 出力スケーリングをリセット
    */
   private resetOutputScale(): void {
-    console.log(`Engine: 出力スケーリングをリセット`);    
     
     // メインコンテナのスケールをリセット
     this.instanceManager.setMainContainerScale(1.0);
@@ -1618,7 +1816,6 @@ export class Engine {
       }
     }
     
-    console.log(`Engine: ${resetCount}個のフレーズコンテナの逆スケーリングをリセット`);    
     
     // 現在の時刻で再描画
     this.instanceManager.update(this.currentTime);
@@ -1632,7 +1829,6 @@ export class Engine {
     // 逆スケール係数（例: スケールが2なら0.5）
     const inverseScale = 1 / scale;
     
-    console.log(`Engine: フレーズコンテナへの逆スケーリング適用 (${inverseScale})`);    
     
     // フレーズレベルのインスタンスを取得し、そのコンテナに逆スケーリングを適用
     const phraseInstances = this.instanceManager.getPhraseInstances();
@@ -1655,7 +1851,6 @@ export class Engine {
       }
     }
     
-    console.log(`Engine: ${updatedCount}個のフレーズコンテナに逆スケーリングを適用`);    
     
     // 現在の時刻で再描画
     this.instanceManager.update(this.currentTime);
@@ -1681,10 +1876,8 @@ export class Engine {
    */
   undo(): boolean {
     try {
-      console.log('Engine: Undo操作開始');
       
       if (!this.projectStateManager.canUndo()) {
-        console.log('Engine: Undoできる状態がありません');
         return false;
       }
       
@@ -1693,8 +1886,8 @@ export class Engine {
         lyricsData: JSON.parse(JSON.stringify(this.phrases)),
         currentTime: this.currentTime,
         templateAssignments: this.templateManager.exportAssignments(),
-        globalParams: this.parameterManager.getGlobalParams(),
-        objectParams: this.parameterManager.exportParameters().objects || {},
+        globalParams: this.parameterManager.getGlobalDefaults(),
+        objectParams: this.parameterManager.exportCompressed().phrases || {},
         defaultTemplateId: this.templateManager.getDefaultTemplateId()
       });
       
@@ -1705,7 +1898,6 @@ export class Engine {
         // 状態を復元
         const restoredState = this.projectStateManager.getCurrentState();
         this.restoreProjectState(restoredState);
-        console.log('Engine: Undo操作完了');
       }
       
       return success;
@@ -1721,10 +1913,8 @@ export class Engine {
    */
   redo(): boolean {
     try {
-      console.log('Engine: Redo操作開始');
       
       if (!this.projectStateManager.canRedo()) {
-        console.log('Engine: Redoできる状態がありません');
         return false;
       }
       
@@ -1735,7 +1925,6 @@ export class Engine {
         // 状態を復元
         const restoredState = this.projectStateManager.getCurrentState();
         this.restoreProjectState(restoredState);
-        console.log('Engine: Redo操作完了');
       }
       
       return success;
@@ -1767,7 +1956,6 @@ export class Engine {
    */
   private restoreProjectState(state: import('./ProjectStateManager').ProjectState): void {
     try {
-      console.log('Engine: プロジェクト状態復元開始', state.label);
       
       // 歌詞データの復元
       if (state.lyricsData) {
@@ -1787,20 +1975,23 @@ export class Engine {
         // ParameterManagerの完全復元メソッドを使用
         this.parameterManager.restoreCompleteState({
           global: state.globalParams,
-          objects: state.objectParams
+          objects: state.objectParams,
+          individualSettingsEnabled: state.individualSettingsEnabled
         });
         
-        // ParamServiceも更新
+        // パラメータマネージャーを更新
         if (state.globalParams) {
-          this.paramService.updateParams('global', null, state.globalParams);
+          this.parameterManager.updateGlobalDefaults(state.globalParams);
         }
         
-        console.log('Engine: パラメータ復元完了 - グローバル:', !!state.globalParams, 'オブジェクト:', !!state.objectParams);
       }
       
       // デフォルトテンプレートの復元
       if (state.defaultTemplateId) {
         this.templateManager.setDefaultTemplateId(state.defaultTemplateId);
+        // ParameterManagerV2のデフォルトテンプレートIDも同期
+        this.parameterManager.setDefaultTemplateId(state.defaultTemplateId);
+        
         const defaultTemplate = this.templateManager.getTemplateById(state.defaultTemplateId);
         if (defaultTemplate) {
           this.template = defaultTemplate;
@@ -1813,8 +2004,8 @@ export class Engine {
       }
       
       // インスタンスマネージャーの更新
-      this.instanceManager.updateTemplateAssignments(this.templateManager, this.parameterManager);
-      this.instanceManager.updateTemplate(this.template, this.parameterManager.getGlobalParams());
+      this.instanceManager.updateTemplateAssignments(this.templateManager);
+      this.instanceManager.updateTemplate(this.template, this.parameterManager.getGlobalDefaults());
       
       // 現在の時刻で再描画
       this.instanceManager.update(this.currentTime);
@@ -1822,7 +2013,6 @@ export class Engine {
       // タイムライン更新イベントを発火
       this.dispatchTimelineUpdatedEvent();
       
-      console.log('Engine: プロジェクト状態復元完了');
     } catch (error) {
       console.error('Engine: プロジェクト状態復元エラー:', error);
     }
@@ -1846,63 +2036,36 @@ export class Engine {
     };
   }
 
-  // プロジェクト読み込み
-  loadProject(config: any): boolean {
+  // プロジェクト読み込み（統一復元マネージャー使用）
+  async loadProject(config: any): Promise<boolean> {
     try {
-      // テンプレート割り当て情報の復元
-      if (config.templateAssignments) {
-        this.templateManager.importAssignments(config.templateAssignments);
+      
+      // 統一復元マネージャーを使用
+      const success = await this.unifiedRestoreManager.restoreFromFile(config as ProjectFileData);
+      
+      if (success) {
+        // 初期状態をProjectStateManagerに保存
+        const paramExport = this.parameterManager.exportCompressed();
+        this.projectStateManager.updateCurrentState({
+          lyricsData: JSON.parse(JSON.stringify(this.phrases)),
+          currentTime: this.currentTime,
+          templateAssignments: this.templateManager.exportAssignments(),
+          globalParams: this.parameterManager.getGlobalDefaults(),
+          objectParams: paramExport.objects || {},
+          individualSettingsEnabled: paramExport.individualSettingsEnabled || [],
+          defaultTemplateId: this.templateManager.getDefaultTemplateId()
+        });
+        this.projectStateManager.saveCurrentState('プロジェクト読み込み完了');
+        
       }
       
-      // パラメータの復元
-      if (config.globalParams) {
-        this.parameterManager.updateGlobalParams(config.globalParams);
-      }
-      
-      if (config.objectParams) {
-        for (const [id, params] of Object.entries(config.objectParams)) {
-          this.parameterManager.updateObjectParams(id, params as Record<string, any>);
-        }
-      }
-      
-      // 歌詞データの復元
-      if (config.lyrics) {
-        this.loadLyrics(config.lyrics);
-      }
-      
-      // デフォルトテンプレートの設定
-      if (config.defaultTemplateId) {
-        this.templateManager.setDefaultTemplateId(config.defaultTemplateId);
-        // メインテンプレートも更新
-        const defaultTemplate = this.templateManager.getTemplateById(config.defaultTemplateId);
-        if (defaultTemplate) {
-          this.template = defaultTemplate;
-        }
-      }
-      
-      // インスタンスマネージャーの更新
-      this.instanceManager.updateTemplate(this.template, this.parameterManager.getGlobalParams());
-      
-      // 現在の時刻で再描画
-      this.instanceManager.update(this.currentTime);
-      
-      // 初期状態をProjectStateManagerに保存
-      this.projectStateManager.updateCurrentState({
-        lyricsData: JSON.parse(JSON.stringify(this.phrases)),
-        currentTime: this.currentTime,
-        templateAssignments: this.templateManager.exportAssignments(),
-        globalParams: this.parameterManager.getGlobalParams(),
-        objectParams: this.parameterManager.exportParameters().objects || {},
-        defaultTemplateId: this.templateManager.getDefaultTemplateId()
-      });
-      this.projectStateManager.saveCurrentState('プロジェクト読み込み完了');
-      
-      return true;
+      return success;
     } catch (error) {
       console.error(`Engine: プロジェクト読み込みエラー:`, error);
       return false;
     }
   }
+
 
   // 方眼目盛りの表示/非表示を切り替え
   toggleGrid(): void {
@@ -1971,7 +2134,6 @@ export class Engine {
       // Update the PIXI application background color
       this.app.renderer.backgroundColor = colorNumber;
       
-      console.log(`Engine: Background color changed to: ${hexColor} (${colorNumber})`);
     } catch (error) {
       console.error(`Engine: Error setting background color: ${hexColor}`, error);
     }
@@ -1980,23 +2142,22 @@ export class Engine {
   /**
    * 背景画像を設定
    */
-  setBackgroundImage(imageUrl: string, fitMode: BackgroundFitMode = 'cover'): void {
+  setBackgroundImage(imageFilePath: string, fitMode: BackgroundFitMode = 'cover'): void {
     this.clearBackgroundMedia();
     
     this.backgroundConfig = {
       type: 'image',
-      imageUrl,
+      imageFilePath,
       fitMode,
       backgroundColor: this.backgroundConfig.backgroundColor
     };
     
-    PIXI.Texture.from(imageUrl).then((texture) => {
+    PIXI.Texture.from(imageFilePath).then((texture) => {
       this.backgroundSprite = new PIXI.Sprite(texture);
       this.applyBackgroundFitMode(this.backgroundSprite, fitMode);
       this.backgroundLayer.addChild(this.backgroundSprite);
-      console.log(`Engine: Background image set: ${imageUrl} (${fitMode})`);
     }).catch((error) => {
-      console.error(`Engine: Failed to load background image: ${imageUrl}`, error);
+      console.error(`Engine: Failed to load background image: ${imageFilePath}`, error);
       // フォールバック: 背景色に戻す
       this.clearBackgroundMedia();
     });
@@ -2005,19 +2166,26 @@ export class Engine {
   /**
    * 背景動画を設定
    */
-  setBackgroundVideo(videoUrl: string, fitMode: BackgroundFitMode = 'cover'): void {
+  setBackgroundVideo(videoFilePath: string, fitMode: BackgroundFitMode = 'cover'): void {
     this.clearBackgroundMedia();
     
     this.backgroundConfig = {
       type: 'video',
-      videoUrl,
+      videoFilePath,
       fitMode,
       backgroundColor: this.backgroundConfig.backgroundColor
     };
     
     // HTML5 Video要素を作成
     const video = document.createElement('video');
-    video.src = videoUrl;
+    // Properly encode the file path if it's a local file
+    if (videoFilePath.startsWith('/') || videoFilePath.match(/^[A-Za-z]:\\/)) {
+      // Convert to file:// URL and encode the path part
+      const encodedPath = 'file://' + encodeURI(videoFilePath.replace(/\\/g, '/'));
+      video.src = encodedPath;
+    } else {
+      video.src = videoFilePath;
+    }
     video.loop = true;
     video.muted = true; // 自動再生のためにミュート
     video.playsInline = true;
@@ -2036,11 +2204,10 @@ export class Engine {
         video.play().catch(console.error);
       }
       
-      console.log(`Engine: Background video set: ${videoUrl} (${fitMode})`);
     });
     
     video.addEventListener('error', (error) => {
-      console.error(`Engine: Failed to load background video: ${videoUrl}`, error);
+      console.error(`Engine: Failed to load background video: ${videoFilePath}`, error);
       // フォールバック: 背景色に戻す
       this.clearBackgroundMedia();
     });
@@ -2061,7 +2228,7 @@ export class Engine {
     
     this.backgroundConfig = {
       type: 'video',
-      videoUrl: 'electron://loaded',
+      videoFilePath: fileName || 'loaded',
       fitMode,
       backgroundColor: this.backgroundConfig.backgroundColor
     };
@@ -2080,7 +2247,6 @@ export class Engine {
       video.play().catch(console.error);
     }
     
-    console.log(`Engine: Background video set from HTMLVideoElement (${fitMode})${fileName ? ` - ${fileName}` : ''}`);
   }
 
   /**
@@ -2109,8 +2275,8 @@ export class Engine {
     
     // 背景色タイプに戻す
     this.backgroundConfig.type = 'color';
-    delete this.backgroundConfig.imageUrl;
-    delete this.backgroundConfig.videoUrl;
+    delete this.backgroundConfig.imageFilePath;
+    delete this.backgroundConfig.videoFilePath;
   }
   
   /**
@@ -2186,7 +2352,6 @@ export class Engine {
     if (this.debugManager) {
       const enabled = !this.debugManager.isEnabled();
       this.debugManager.setEnabled(enabled);
-      console.log(`デバッグモード: ${enabled ? '有効' : '無効'}`);
     }
   }
   
@@ -2194,7 +2359,6 @@ export class Engine {
   setDebugEnabled(enabled: boolean): void {
     if (this.debugManager) {
       this.debugManager.setEnabled(enabled);
-      console.log(`デバッグモード: ${enabled ? '有効' : '無効'}`);
     }
   }
   
@@ -2236,7 +2400,6 @@ export class Engine {
         }
       }
       
-      console.log(`Engine: ステージをリサイズしました - ${aspectRatio} (${orientation}) - ${width}x${height}`);
     }
   }
   
@@ -2254,6 +2417,28 @@ export class Engine {
     canvas.style.left = '50%';
     canvas.style.top = '50%';
     canvas.style.transform = 'translate(-50%, -50%)';
+  }
+  
+  /**
+   * 個別設定が有効化されたオブジェクトのパラメータを保持
+   */
+  private preserveIndividualSettingObjectParams(): Map<string, StandardParameters> {
+    return new Map<string, StandardParameters>();
+  }
+  
+  /**
+   * 個別設定が有効化されたオブジェクトのパラメータを復元
+   */
+  private restoreIndividualSettingObjectParams(preserved: Map<string, StandardParameters>): void {
+    
+    preserved.forEach((params, objectId) => {
+      // パラメータを復元
+      this.parameterManager.updateObjectParams(objectId, params);
+      
+      // インスタンスも更新
+      this.updateObjectInstance(objectId);
+    });
+    
   }
   
   /**
@@ -2284,7 +2469,7 @@ export class Engine {
   /**
    * ParameterManagerを取得
    */
-  getParameterManager(): ParameterManager {
+  getParameterManager(): ParameterManagerV2 {
     return this.parameterManager;
   }
   
@@ -2298,15 +2483,14 @@ export class Engine {
    */
   manualRecalculate(): void {
     try {
-      console.log('Engine: 手動再計算を開始');
       
       // 状態保存（Undo用）
       this.projectStateManager.updateCurrentState({
         lyricsData: JSON.parse(JSON.stringify(this.phrases)),
         currentTime: this.currentTime,
         templateAssignments: this.templateManager.exportAssignments(),
-        globalParams: this.parameterManager.getGlobalParams(),
-        objectParams: this.parameterManager.exportParameters().objects || {},
+        globalParams: this.parameterManager.getGlobalDefaults(),
+        objectParams: this.parameterManager.exportCompressed().phrases || {},
         defaultTemplateId: this.templateManager.getDefaultTemplateId()
       });
       this.projectStateManager.saveBeforeLyricsChange('手動再計算');
@@ -2321,7 +2505,7 @@ export class Engine {
       this.instanceManager.loadPhrases(this.phrases, this.charPositions);
       
       // 現在のテンプレートとパラメータで再初期化
-      this.instanceManager.updateTemplate(this.template, this.parameterManager.getGlobalParams());
+      this.instanceManager.updateTemplate(this.template, this.parameterManager.getGlobalDefaults());
       
       // 現在の時刻で再描画
       this.instanceManager.update(this.currentTime);
@@ -2329,7 +2513,6 @@ export class Engine {
       // タイムライン更新イベントを発火
       this.dispatchTimelineUpdatedEvent();
       
-      console.log('Engine: 手動再計算が完了しました');
     } catch (error) {
       console.error('Engine: 手動再計算エラー:', error);
     }
@@ -2351,7 +2534,6 @@ export class Engine {
    */
   captureFrame(outputWidth?: number, outputHeight?: number, includeDebugVisuals: boolean = false): Uint8Array {
     try {
-      console.log(`Capturing frame from main renderer (${outputWidth || this.app.renderer.width}x${outputHeight || this.app.renderer.height})`);
       
       // 現在のレンダラーのサイズ
       const currentWidth = this.app.renderer.width;
@@ -2395,11 +2577,9 @@ export class Engine {
         // レンダラーのサイズを元に戻す
         this.app.renderer.resize(currentWidth, currentHeight);
         
-        console.log(`Frame captured with scaling: ${currentWidth}x${currentHeight} -> ${outputWidth}x${outputHeight}`);
       } else {
         // 現在のサイズのままキャプチャ
         pixels = this.app.renderer.extract.pixels();
-        console.log(`Frame captured at current size: ${currentWidth}x${currentHeight}`);
       }
       
       // デバッグビジュアルの設定を復元
@@ -2412,7 +2592,6 @@ export class Engine {
         }
       }
       
-      console.log(`Captured frame: ${pixels.length} bytes`);
       return pixels;
       
     } catch (error) {
@@ -2423,11 +2602,14 @@ export class Engine {
 
   /**
    * オフスクリーンフレームキャプチャ（シークアンドスナップ方式用）
-   * 画面表示に依存しない独立したフレーム取得
+   * RenderTexturePoolを使用してメモリ効率を最適化
    */
   captureOffscreenFrame(outputWidth: number, outputHeight: number, includeDebugVisuals: boolean = false): Uint8Array {
+    if (!this.renderTexturePool) {
+      throw new Error('Export resources not initialized. Call initializeExportResources first.');
+    }
+
     try {
-      console.log(`Engine: Capturing offscreen frame (${outputWidth}x${outputHeight})`);
       
       // デバッグビジュアルの一時的な制御
       const originalGridVisible = this.gridOverlay?.isVisible() || false;
@@ -2442,34 +2624,53 @@ export class Engine {
         }
       }
       
-      // オフスクリーン用のRenderTextureを作成
-      const renderTexture = PIXI.RenderTexture.create({
-        width: outputWidth,
-        height: outputHeight,
-        resolution: 1
-      });
+      // プールからテクスチャを借りる
+      const renderTexture = this.renderTexturePool.acquire();
       
-      // メインステージをオフスクリーンテクスチャに描画
-      this.app.renderer.render(this.app.stage, { renderTexture });
-      
-      // ピクセルデータを取得
-      const pixels = this.app.renderer.extract.pixels(renderTexture);
-      
-      // オフスクリーンテクスチャをクリーンアップ
-      renderTexture.destroy();
-      
-      // デバッグビジュアルの設定を復元
-      if (!includeDebugVisuals) {
-        if (this.gridOverlay && originalGridVisible) {
-          this.gridOverlay.show();
+      try {
+        // 現在のステージサイズを取得
+        const currentStageWidth = this.app.stage.width;
+        const currentStageHeight = this.app.stage.height;
+        
+        // スケーリング計算（出力サイズに合わせる）
+        const scaleX = outputWidth / currentStageWidth;
+        const scaleY = outputHeight / currentStageHeight;
+        
+        // 現在のスケールを保存
+        const originalScaleX = this.app.stage.scale.x;
+        const originalScaleY = this.app.stage.scale.y;
+        
+        // 一時的にスケーリングを適用
+        this.app.stage.scale.set(scaleX, scaleY);
+        
+        try {
+          // スケーリング済みステージをオフスクリーンテクスチャに描画
+          this.app.renderer.render(this.app.stage, { renderTexture });
+          
+          // ピクセルデータを取得
+          const pixels = this.app.renderer.extract.pixels(renderTexture);
+          
+          return pixels;
+          
+        } finally {
+          // スケーリングを元に戻す
+          this.app.stage.scale.set(originalScaleX, originalScaleY);
         }
-        if (this.debugManager && originalDebugEnabled) {
-          this.debugManager.setEnabled(true);
+        
+      } finally {
+        // テクスチャをプールに返却（破棄しない）
+        this.renderTexturePool.release(renderTexture);
+        
+        // デバッグビジュアルの設定を復元
+        if (!includeDebugVisuals) {
+          if (this.gridOverlay && originalGridVisible) {
+            this.gridOverlay.show();
+          }
+          if (this.debugManager && originalDebugEnabled) {
+            this.debugManager.setEnabled(true);
+          }
         }
       }
-      
-      console.log(`Engine: Offscreen frame captured: ${pixels.length} bytes`);
-      return pixels;
       
     } catch (error) {
       console.error('Engine: Offscreen frame capture error:', error);
@@ -2585,7 +2786,7 @@ export class Engine {
       const templateConfig = this.templateManager.getAllTemplates().find(t => t.id === templateId);
       
       // 有効パラメータを取得
-      const effectiveParams = this.parameterManager.getEffectiveParams(currentPhrase.id, templateId);
+      const effectiveParams = this.getEffectiveParametersForPhrase(currentPhrase.id, templateId);
       
       // コンテナ情報を取得
       const containers = this.getCurrentPhraseContainers(currentPhrase.id);
@@ -2776,76 +2977,79 @@ export class Engine {
     }, Engine.AUTO_SAVE_INTERVAL);
   }
   
-  // Electronアプリデータへの自動保存
+  // Electronアプリデータへの自動保存（V2統一形式）
   private async autoSaveToLocalStorage(): Promise<void> {
     try {
+      // V2統一管理でパラメータデータを取得
+      const parameterData = this.parameterManager.exportCompressed();
+      
+      
       const state = this.projectStateManager.exportFullState();
       
       // 既存の自動保存データを読み込んで、recentFilesを保持
       const existingData = await persistenceService.loadAutoSave();
       
+      // 現在使用中の音楽・動画ファイルのパスを取得
+      let audioFilePath: string | undefined;
+      let backgroundVideoFilePath: string | undefined;
+      
+      try {
+        // ElectronMediaManagerから現在のファイルパスを取得
+        const { electronMediaManager } = await import('../services/ElectronMediaManager');
+        audioFilePath = electronMediaManager.getCurrentAudioFilePath();
+        backgroundVideoFilePath = electronMediaManager.getCurrentVideoFilePath();
+      } catch (error) {
+        console.warn('Engine: ファイルパス取得に失敗:', error);
+      }
+
       const autoSaveData = {
+        timestamp: Date.now(),
         projectState: state,
+        // V2統一管理でパラメータデータを保存
+        parameterData: parameterData,
+        // 個別設定状態も保存
+        individualSettingsEnabled: this.parameterManager.getIndividualSettingsEnabled(),
         engineState: {
-          phrases: this.phrases,
+          phrases: this.phrases,  // 構造とタイミング情報のみ（paramsは除外）
           audioInfo: {
             fileName: this.audioFileName,
             duration: this.audioDuration,
-            url: this.audioURL
+            filePath: this.audioFilePath || audioFilePath
           },
           backgroundVideoInfo: {
-            fileName: this.backgroundVideoFileName
+            fileName: this.backgroundVideoFileName,
+            filePath: backgroundVideoFilePath
           },
           stageConfig: this.stageConfig,
           selectedTemplate: this.templateManager.getDefaultTemplateId(),
-          templateParams: this.parameterManager.getGlobalParams(),
+          templateParams: this.parameterManager.exportCompressed(),
           backgroundConfig: this.backgroundConfig
         },
         // 既存のrecentFilesデータを保持
         recentFiles: existingData?.recentFiles || { audioFiles: [], backgroundVideoFiles: [] }
       };
       
-      console.log('Engine: ===== 自動保存データ詳細ログ =====');
-      console.log('Engine: 音楽ファイル名:', this.audioFileName);
-      console.log('Engine: 背景動画ファイル名:', this.backgroundVideoFileName);
-      console.log('Engine: audioInfo:', autoSaveData.engineState.audioInfo);
-      console.log('Engine: backgroundVideoInfo:', autoSaveData.engineState.backgroundVideoInfo);
-      console.log('Engine: backgroundConfig:', autoSaveData.engineState.backgroundConfig);
-      console.log('Engine: recentFiles保持状況:', {
-        hasRecentFiles: !!autoSaveData.recentFiles,
-        audioFilesCount: autoSaveData.recentFiles?.audioFiles?.length || 0,
-        backgroundVideoFilesCount: autoSaveData.recentFiles?.backgroundVideoFiles?.length || 0,
-        audioFiles: autoSaveData.recentFiles?.audioFiles || [],
-        backgroundVideoFiles: autoSaveData.recentFiles?.backgroundVideoFiles || []
-      });
-      
       const success = await persistenceService.saveAutoSave(autoSaveData);
       if (success) {
         this.lastAutoSaveTime = Date.now();
-        console.log('Engine: 自動保存が完了しました');
       } else {
-        console.error('Engine: 自動保存に失敗しました（saveAutoSaveがfalseを返しました）');
+        console.warn('Engine: 自動保存に失敗しました（ディレクトリが存在しない可能性があります）');
       }
     } catch (error) {
       console.error('Engine: 自動保存に失敗しました:', error);
     }
   }
   
-  // Electronアプリデータからの復元
+  // Electronアプリデータからの復元（統一復元マネージャー使用）
   public async loadFromLocalStorage(): Promise<boolean> {
     try {
       const autoSaveData = await persistenceService.loadAutoSave();
       if (!autoSaveData) {
-        console.log('Engine: 自動保存データが見つかりません');
         return false;
       }
       
-      console.log('Engine: ===== 自動保存データの詳細ログ =====');
-      console.log('Engine: autoSaveData全体:', JSON.stringify(autoSaveData, null, 2));
-      
       // データの有効期限チェック
       if (Date.now() - autoSaveData.timestamp > Engine.AUTO_SAVE_EXPIRY) {
-        console.log('Engine: 自動保存データの有効期限切れ');
         await persistenceService.deleteAutoSave();
         return false;
       }
@@ -2858,135 +3062,41 @@ export class Engine {
         return false;
       }
       
-      const engineState = autoSaveData.engineState;
-      const projectState = autoSaveData.projectState;
       
-      console.log('Engine: engineState.audioInfo:', engineState.audioInfo);
-      console.log('Engine: engineState.backgroundVideoInfo:', engineState.backgroundVideoInfo);
-      console.log('Engine: engineState.backgroundConfig:', engineState.backgroundConfig);
+      // 統一復元マネージャーを使用
+      const success = await this.unifiedRestoreManager.restoreFromAutoSave(autoSaveData as AutoSaveData);
       
-      // 復元処理開始マーカー
-      console.log('Engine: ===== 復元処理開始 =====');
-      
-      // ステージ設定の復元（既に初期化時に適用済みの場合はスキップ）
-      if (engineState.stageConfig) {
-        const needsResize = (
-          this.stageConfig.aspectRatio !== engineState.stageConfig.aspectRatio ||
-          this.stageConfig.orientation !== engineState.stageConfig.orientation
-        );
-        
-        if (needsResize) {
-          console.log('Engine: ステージ設定が変更されているためリサイズを実行');
-          this.stageConfig = engineState.stageConfig;
-          this.resizeStage(this.stageConfig.aspectRatio, this.stageConfig.orientation);
-        } else {
-          console.log('Engine: ステージ設定は既に正しく適用されているためリサイズをスキップ');
-          this.stageConfig = engineState.stageConfig;
-        }
+      if (success) {
       }
       
-      // 背景設定の復元
-      if (engineState.backgroundConfig) {
-        this.updateBackgroundConfig(engineState.backgroundConfig);
-        console.log(`Engine: 背景設定を復元: ${JSON.stringify(engineState.backgroundConfig)}`);
-      }
-      
-      // 音楽ファイル情報の復元と自動読み込み
-      console.log('Engine: 音楽ファイル復元チェック開始');
-      console.log('Engine: engineState.audioInfo:', engineState.audioInfo);
-      console.log('Engine: engineState.audioInfo?.fileName:', engineState.audioInfo?.fileName);
-      console.log('Engine: 条件チェック結果:', !!(engineState.audioInfo && engineState.audioInfo.fileName));
-      
-      if (engineState.audioInfo && engineState.audioInfo.fileName) {
-        console.log('Engine: 音楽ファイル復元条件を満たしています');
-        this.audioFileName = engineState.audioInfo.fileName;
-        this.audioDuration = engineState.audioInfo.duration || 10000;
-        this.audioURL = engineState.audioInfo.url;
-        console.log(`Engine: 音楽ファイル情報を復元: ${this.audioFileName}`);
-        
-        // 音楽ファイルの自動読み込みを試行
-        console.log(`Engine: 音楽ファイル復元イベント発火: ${engineState.audioInfo.fileName}`);
-        this.requestAudioFileRestore(engineState.audioInfo.fileName);
-        console.log('Engine: 音楽ファイル復元イベント発火完了');
-      } else {
-        console.log('Engine: 音楽ファイル復元条件を満たしていません');
-        console.log('Engine: 音楽ファイル情報なし - audioInfo:', engineState.audioInfo);
-      }
-      
-      // 背景動画ファイル情報の復元と自動読み込み
-      console.log('Engine: 背景動画復元チェック開始');
-      console.log('Engine: engineState.backgroundVideoInfo:', engineState.backgroundVideoInfo);
-      console.log('Engine: engineState.backgroundVideoInfo?.fileName:', engineState.backgroundVideoInfo?.fileName);
-      console.log('Engine: 条件チェック結果:', !!(engineState.backgroundVideoInfo && engineState.backgroundVideoInfo.fileName));
-      
-      if (engineState.backgroundVideoInfo && engineState.backgroundVideoInfo.fileName) {
-        console.log('Engine: 背景動画復元条件を満たしています');
-        this.backgroundVideoFileName = engineState.backgroundVideoInfo.fileName;
-        console.log(`Engine: 背景動画ファイル情報を復元: ${this.backgroundVideoFileName}`);
-        
-        // 背景動画ファイルの自動読み込みを試行
-        console.log(`Engine: 背景動画復元イベント発火: ${engineState.backgroundVideoInfo.fileName}`);
-        this.requestBackgroundVideoRestore(engineState.backgroundVideoInfo.fileName);
-        console.log('Engine: 背景動画復元イベント発火完了');
-      } else {
-        console.log('Engine: 背景動画復元条件を満たしていません');
-        console.log('Engine: 背景動画ファイル情報なし - backgroundVideoInfo:', engineState.backgroundVideoInfo);
-      }
-      
-      // プロジェクト状態の復元
-      if (projectState) {
-        this.projectStateManager.importState(projectState);
-        
-        // パラメータの復元
-        if (projectState.globalParams) {
-          this.parameterManager.updateGlobalParams(projectState.globalParams);
-        }
-        
-        // テンプレート割り当ての復元
-        if (projectState.templateAssignments) {
-          this.templateManager.importAssignments(projectState.templateAssignments);
-        }
-      }
-      
-      // 歌詞データの復元
-      if (engineState.phrases && engineState.phrases.length > 0) {
-        this.loadLyrics(engineState.phrases);
-      }
-      
-      console.log('Engine: 自動保存データから復元しました');
-      return true;
+      return success;
     } catch (error) {
       console.error('Engine: 自動保存データの復元に失敗しました:', error);
       return false;
     }
   }
+
   
-  // 自動保存データの存在確認と復元プロンプト
-  private async checkAndPromptAutoRestore(): Promise<void> {
+  
+  // 自動復元（ダイアログなし）
+  private async silentAutoRestore(): Promise<void> {
     try {
-      console.log('Engine: 自動保存データの存在確認開始');
       const hasAutoSave = await persistenceService.hasAutoSave();
-      console.log(`Engine: 自動保存データの存在: ${hasAutoSave}`);
+      
       if (!hasAutoSave) {
-        console.log('Engine: 自動保存データなし、復元処理をスキップ');
         return;
       }
       
-      console.log('Engine: 自動保存データの読み込み開始');
       const autoSaveData = await persistenceService.loadAutoSave();
       if (!autoSaveData) {
-        console.log('Engine: 自動保存データの読み込み失敗');
         return;
       }
-      console.log('Engine: 自動保存データの読み込み成功');
       
       const timeAgo = Date.now() - autoSaveData.timestamp;
-      console.log(`Engine: 自動保存データの経過時間: ${timeAgo}ms, 有効期限: ${Engine.AUTO_SAVE_EXPIRY}ms`);
       
-      // 24時間以内のデータの場合
+      // 24時間以内のデータの場合、自動的に復元
       if (timeAgo < Engine.AUTO_SAVE_EXPIRY) {
-        console.log('Engine: 自動保存データは有効期限内');
-        // Electron形式のデータ構造のみサポート
+        
         if (!autoSaveData.engineState) {
           console.error('Engine: 無効な自動保存データ形式');
           return;
@@ -2994,23 +3104,41 @@ export class Engine {
         
         const hasLyrics = !!(autoSaveData.engineState.phrases && autoSaveData.engineState.phrases.length > 0);
         const hasAudio = !!autoSaveData.engineState.audioInfo?.fileName;
-        console.log(`Engine: 復元可能なデータ - 歌詞: ${hasLyrics}, 音楽: ${hasAudio}`);
+        const hasBackgroundVideo = !!autoSaveData.engineState.backgroundVideoInfo?.fileName;
         
-        // App.tsx で復元確認ダイアログを表示するためのイベントを発火
-        console.log('Engine: 復元確認ダイアログ表示イベントを発火');
-        window.dispatchEvent(new CustomEvent('visiblyrics:autosave-available', {
-          detail: {
-            timestamp: autoSaveData.timestamp,
-            hasLyrics,
-            hasAudio
+        
+        // loadFromLocalStorageを呼び出して実際の復元を実行
+        const restored = await this.loadFromLocalStorage();
+        
+        if (restored) {
+          
+          // 音楽・背景動画ファイルの復元処理も改善版に変更
+          if (hasAudio && autoSaveData.engineState.audioInfo) {
+            const audioInfo = autoSaveData.engineState.audioInfo;
+            await this.requestAudioFileRestoreWithPath(audioInfo.fileName, audioInfo.filePath);
           }
-        }));
-        console.log('Engine: 復元確認ダイアログ表示イベント発火完了');
+          
+          if (hasBackgroundVideo && autoSaveData.engineState.backgroundVideoInfo) {
+            const videoInfo = autoSaveData.engineState.backgroundVideoInfo;
+            await this.requestBackgroundVideoRestoreWithPath(videoInfo.fileName, videoInfo.filePath);
+          }
+          
+          // 自動復元完了時にUIにテンプレート状態を通知
+          if (autoSaveData.engineState.selectedTemplate) {
+            window.dispatchEvent(new CustomEvent('auto-restore-template-updated', {
+              detail: {
+                templateId: autoSaveData.engineState.selectedTemplate,
+                params: autoSaveData.engineState.templateParams
+              }
+            }));
+          }
+        } else {
+        }
       } else {
-        console.log('Engine: 自動保存データは有効期限切れ');
+        await persistenceService.deleteAutoSave();
       }
     } catch (error) {
-      console.error('Engine: 自動保存データの確認に失敗しました:', error);
+      console.error('Engine: 自動復元に失敗しました:', error);
     }
   }
   
@@ -3018,7 +3146,6 @@ export class Engine {
   public async clearAutoSave(): Promise<void> {
     try {
       await persistenceService.deleteAutoSave();
-      console.log('Engine: 自動保存データをクリアしました');
     } catch (error) {
       console.error('Engine: 自動保存データのクリアに失敗しました:', error);
     }
@@ -3049,17 +3176,13 @@ export class Engine {
         );
         
         if (needsResize) {
-          console.log('Engine: 自動保存のステージ設定を適用:', autoSaveStageConfig);
           this.stageConfig = autoSaveStageConfig;
           this.resizeStage(this.stageConfig.aspectRatio, this.stageConfig.orientation);
         } else {
-          console.log('Engine: ステージ設定は既に正しく設定されています');
         }
       } else {
-        console.log('Engine: 自動保存にステージ設定がないためデフォルト設定を維持');
       }
     } catch (error) {
-      console.log('Engine: 自動保存からのステージ設定取得に失敗:', error);
     }
   }
 
@@ -3069,7 +3192,38 @@ export class Engine {
     window.dispatchEvent(new CustomEvent('visiblyrics:restore-audio-file', {
       detail: { fileName }
     }));
-    console.log(`Engine: 音楽ファイル復元要求を発行: ${fileName}`);
+  }
+  
+  // 音楽ファイルの復元要求（パス付き） - 改善版
+  private async requestAudioFileRestoreWithPath(fileName: string, filePath?: string): Promise<void> {
+    try {
+      
+      // ElectronMediaManagerを直接呼び出して復元
+      const { electronMediaManager } = await import('../services/ElectronMediaManager');
+      const result = await electronMediaManager.restoreAudioFile(fileName, filePath);
+      
+      if (result) {
+        // HTMLAudioElementをHowlerで再読み込み
+        this.loadAudioElement(result.audio, result.fileName);
+        
+        // UI側に音楽ファイル復元完了を通知
+        setTimeout(async () => {
+          const actualFilePath = electronMediaManager.getCurrentAudioFilePath();
+          const audioLoadEvent = new CustomEvent('music-file-loaded', {
+            detail: { 
+              filePath: actualFilePath,
+              fileName: result.fileName,
+              timestamp: Date.now(),
+              isRestored: true  // 復元されたファイルであることを示すフラグ
+            }
+          });
+          window.dispatchEvent(audioLoadEvent);
+        }, 100);
+      } else {
+      }
+    } catch (error) {
+      console.error(`Engine: 音楽ファイル復元に失敗: ${fileName}`, error);
+    }
   }
   
   private requestBackgroundVideoRestore(fileName: string): void {
@@ -3077,7 +3231,269 @@ export class Engine {
     window.dispatchEvent(new CustomEvent('visiblyrics:restore-background-video', {
       detail: { fileName }
     }));
-    console.log(`Engine: 背景動画復元要求を発行: ${fileName}`);
+  }
+  
+  // 背景動画の復元要求（パス付き） - 改善版
+  private async requestBackgroundVideoRestoreWithPath(fileName: string, filePath?: string): Promise<void> {
+    try {
+      
+      // ElectronMediaManagerを直接呼び出して復元
+      const { electronMediaManager } = await import('../services/ElectronMediaManager');
+      const result = await electronMediaManager.restoreBackgroundVideo(fileName, filePath);
+      
+      if (result) {
+        // 背景動画として設定（Electron用メソッド）
+        this.setBackgroundVideoElement(result.video, 'cover', result.fileName);
+      } else {
+      }
+    } catch (error) {
+      console.error(`Engine: 背景動画復元に失敗: ${fileName}`, error);
+    }
+  }
+  
+  /**
+   * カスタムイベントを window に dispatch
+   */
+  private dispatchCustomEvent(eventType: string, detail?: any): void {
+    const event = new CustomEvent(eventType, { 
+      detail: detail,
+      bubbles: true,
+      cancelable: true
+    });
+    window.dispatchEvent(event);
+  }
+  
+  /**
+   * エクスポート用リソースを初期化（RenderTexturePool）
+   */
+  initializeExportResources(width: number, height: number): void {
+    this.renderTexturePool = new RenderTexturePool(width, height, 5);
+    
+    // エクスポート用高解像度テキストの準備
+    this.prepareHighResolutionTextForExport(width, height);
+    
+  }
+
+  /**
+   * エクスポート用リソースをクリーンアップ
+   */
+  cleanupExportResources(): void {
+    if (this.renderTexturePool) {
+      this.renderTexturePool.destroy();
+      this.renderTexturePool = undefined;
+    }
+    
+    // 高解像度テキストを元に戻す
+    this.restoreOriginalTextAfterExport();
+    
+  }
+  
+  /**
+   * エクスポート用の高解像度テキストを準備
+   * @param exportWidth エクスポート幅
+   * @param exportHeight エクスポート高さ
+   */
+  private prepareHighResolutionTextForExport(exportWidth: number, exportHeight: number): void {
+    if (!this.instanceManager) {
+      console.warn('Engine: InstanceManager not available for high-resolution text preparation');
+      return;
+    }
+    
+    
+    // 全ての文字コンテナを取得してテキストを高解像度で再生成
+    this.instanceManager.getAllInstances().forEach(instance => {
+      if (instance.phraseContainer) {
+        this.updateTextInContainer(instance.phraseContainer, exportWidth, exportHeight, true);
+      }
+    });
+  }
+  
+  /**
+   * エクスポート後に元のテキストに復元
+   */
+  private restoreOriginalTextAfterExport(): void {
+    if (!this.instanceManager) {
+      return;
+    }
+    
+    
+    // 全ての文字コンテナを取得してテキストを元の解像度で再生成
+    this.instanceManager.getAllInstances().forEach(instance => {
+      if (instance.phraseContainer) {
+        this.updateTextInContainer(instance.phraseContainer, this.stageConfig.baseWidth, this.stageConfig.baseHeight, false);
+      }
+    });
+  }
+  
+  /**
+   * コンテナ内のテキストを更新（解像度適応型）
+   * @param container 対象コンテナ
+   * @param targetWidth 目標幅
+   * @param targetHeight 目標高さ
+   * @param isExport エクスポート用かどうか
+   */
+  private updateTextInContainer(
+    container: PIXI.Container, 
+    targetWidth: number, 
+    targetHeight: number, 
+    isExport: boolean
+  ): void {
+    // 再帰的に全ての子コンテナを処理
+    container.children.forEach(child => {
+      if (child instanceof PIXI.Container) {
+        // 文字コンテナかどうかを判定（PIXITextが含まれているかで判断）
+        const textChild = child.children.find(grandChild => grandChild instanceof PIXI.Text) as PIXI.Text;
+        
+        if (textChild) {
+          // テキストオブジェクトを高解像度で再生成
+          this.recreateTextForResolution(child, textChild, targetWidth, targetHeight, isExport);
+        } else {
+          // 子コンテナも再帰的に処理
+          this.updateTextInContainer(child, targetWidth, targetHeight, isExport);
+        }
+      }
+    });
+  }
+  
+  /**
+   * テキストオブジェクトを指定解像度で再生成
+   * @param parentContainer 親コンテナ
+   * @param originalText 元のテキストオブジェクト
+   * @param targetWidth 目標幅
+   * @param targetHeight 目標高さ
+   * @param isExport エクスポート用かどうか
+   */
+  private recreateTextForResolution(
+    parentContainer: PIXI.Container,
+    originalText: PIXI.Text,
+    targetWidth: number,
+    targetHeight: number,
+    isExport: boolean
+  ): void {
+    try {
+      // 元のテキストの情報を保存
+      const originalTextContent = originalText.text;
+      const originalStyle = originalText.style;
+      const originalPosition = { x: originalText.x, y: originalText.y };
+      const originalAnchor = { x: originalText.anchor.x, y: originalText.anchor.y };
+      const originalScale = { x: originalText.scale.x, y: originalText.scale.y };
+      const originalAlpha = originalText.alpha;
+      const originalVisible = originalText.visible;
+      
+      // 新しいテキストオブジェクトを作成
+      const textOptions = {
+        fontFamily: originalStyle.fontFamily as string,
+        fontSize: originalStyle.fontSize as number,
+        fill: originalStyle.fill as string,
+        align: (originalStyle.align as 'left' | 'center' | 'right') || 'center',
+        fontWeight: (originalStyle.fontWeight as string) || 'normal',
+        fontStyle: (originalStyle.fontStyle as string) || 'normal'
+      };
+      
+      let newText: PIXI.Text;
+      
+      if (isExport) {
+        // エクスポート用の高解像度テキストを作成
+        const { TextStyleFactory } = require('../utils/TextStyleFactory');
+        newText = TextStyleFactory.createExportText(
+          originalTextContent,
+          textOptions,
+          targetWidth,
+          targetHeight
+        );
+      } else {
+        // 通常の解像度のテキストを作成
+        const { TextStyleFactory } = require('../utils/TextStyleFactory');
+        newText = TextStyleFactory.createText(originalTextContent, textOptions);
+      }
+      
+      // 元の属性を復元
+      newText.position.set(originalPosition.x, originalPosition.y);
+      newText.anchor.set(originalAnchor.x, originalAnchor.y);
+      newText.scale.set(originalScale.x, originalScale.y);
+      newText.alpha = originalAlpha;
+      newText.visible = originalVisible;
+      
+      // 元のテキストを削除して新しいテキストを追加
+      parentContainer.removeChild(originalText);
+      parentContainer.addChild(newText);
+      
+    } catch (error) {
+      console.error('Engine: Failed to recreate text for resolution:', error);
+    }
+  }
+  
+  // =====================================
+  // ParameterManagerV2 統合メソッド
+  // =====================================
+  
+  /**
+   * V2パラメータマネージャーの初期化（コンストラクタで実行済み）
+   */
+  
+  /**
+   * パラメータ取得（V2専用）
+   */
+  public getEffectiveParametersForPhrase(phraseId: string, templateId: string): StandardParameters {
+    // V2モード: フレーズが初期化されていない場合は初期化
+    if (!this.parameterManager.isPhraseInitialized(phraseId)) {
+      this.parameterManager.initializePhrase(phraseId, templateId);
+    }
+    return this.parameterManager.getParameters(phraseId);
+  }
+  
+  /**
+   * パラメータ更新（V2専用）
+   */
+  public updatePhraseParameters(phraseId: string, params: Partial<StandardParameters>): void {
+    // V2モード: 直接更新
+    this.parameterManager.updateParameters(phraseId, params);
+  }
+  
+  /**
+   * グローバルパラメータ更新（V2専用）
+   */
+  public updateGlobalParameters(params: Partial<StandardParameters>): void {
+    // V2モード: グローバルデフォルトを更新
+    this.parameterManager.updateGlobalDefaults(params);
+    
+    // V2モード: 既存のすべてのフレーズにバッチ更新で変更を適用
+    const batchUpdates = this.phrases
+      .filter(phrase => this.parameterManager.isPhraseInitialized(phrase.id))
+      .map(phrase => ({ phraseId: phrase.id, params }));
+    
+    if (batchUpdates.length > 0) {
+      this.parameterManager.updateParametersForMultiplePhrasesWithoutNotification(batchUpdates);
+      
+      // バッチ更新後に一度だけInstance更新を実行
+      if (this.instanceManager) {
+        this.instanceManager.updateExistingInstances();
+        this.instanceManager.update(this.currentTime);
+      }
+    }
+    
+    // プロジェクト状態を更新
+    const currentState = this.projectStateManager.getCurrentState();
+    if (currentState) {
+      this.projectStateManager.updateCurrentState({
+        globalParams: { ...currentState.globalParams, ...params }
+      });
+    }
+  }
+  
+  /**
+   * テンプレート変更（V2専用）
+   */
+  public handleTemplateChangeForPhrase(
+    phraseId: string,
+    newTemplateId: string,
+    preserveParams: boolean = true
+  ): void {
+    // V2モード
+    this.parameterManager.handleTemplateChange(phraseId, newTemplateId, preserveParams);
+    
+    // テンプレート割り当ての更新
+    this.templateManager.assignTemplate(phraseId, newTemplateId);
   }
   
 }

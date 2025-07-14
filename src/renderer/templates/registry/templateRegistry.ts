@@ -1,5 +1,7 @@
 import { IAnimationTemplate, TemplateMetadata } from '../../types/types';
 import * as templates from '../index';
+import templatesConfig from './templates.json';
+import { TemplatesJson } from './types';
 
 // テンプレートレジストリの型定義
 export interface TemplateRegistryEntry {
@@ -9,29 +11,19 @@ export interface TemplateRegistryEntry {
   metadata?: TemplateMetadata; // テンプレートメタデータ（レジストリレベル）
 }
 
+// JSONからテンプレートレジストリを動的に生成
+function createTemplateRegistry(): TemplateRegistryEntry[] {
+  const config = templatesConfig as TemplatesJson;
+  return config.templates.map(templateConfig => ({
+    id: templateConfig.id,
+    name: templateConfig.name,
+    template: (templates as any)[templateConfig.exportName] as IAnimationTemplate,
+    metadata: undefined
+  }));
+}
+
 // テンプレートの登録
-export const templateRegistry: TemplateRegistryEntry[] = [
-  {
-    id: 'multilinetext',
-    name: '多段歌詞テキスト',
-    template: templates.MultiLineText
-  },
-  {
-    id: 'glitchtext',
-    name: 'グリッチテキスト',
-    template: templates.GlitchText
-  },
-  {
-    id: 'wordslidetext',
-    name: '単語スライドテキスト',
-    template: templates.WordSlideText
-  },
-  {
-    id: 'flickerfadetemplate',
-    name: '点滅フェードテキスト',
-    template: templates.FlickerFadeTemplate
-  }
-];
+export const templateRegistry: TemplateRegistryEntry[] = createTemplateRegistry();
 
 // IDからテンプレートを取得
 export function getTemplateById(id: string): IAnimationTemplate | undefined {

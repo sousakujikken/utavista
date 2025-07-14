@@ -37,7 +37,6 @@ export interface CharUnit {
   start: number;
   end: number;
   pixiObj?: PIXI.Text;
-  params?: Record<string, any>; // テンプレートパラメータ
   // 文字カウント情報
   charIndex?: number;    // フレーズ内での文字位置（0から開始）
   totalChars?: number;   // フレーズ内の総文字数
@@ -50,7 +49,6 @@ export interface WordUnit {
   start: number;
   end: number;
   chars: CharUnit[];
-  params?: Record<string, any>; // テンプレートパラメータ
 }
 
 export interface PhraseUnit {
@@ -59,7 +57,6 @@ export interface PhraseUnit {
   start: number;
   end: number;
   words: WordUnit[];
-  params?: Record<string, any>; // テンプレートパラメータ
 }
 
 // テンプレート著作者情報インターフェース
@@ -292,8 +289,8 @@ export type BackgroundFitMode = 'cover' | 'contain' | 'stretch';
 export interface BackgroundConfig {
   type: BackgroundType;
   backgroundColor?: string;
-  imageUrl?: string;
-  videoUrl?: string;
+  imageFilePath?: string;
+  videoFilePath?: string;
   fitMode?: BackgroundFitMode;
   opacity?: number;
 }

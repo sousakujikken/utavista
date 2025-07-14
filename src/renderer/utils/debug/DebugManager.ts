@@ -47,7 +47,6 @@ export class DebugManager {
     // グローバルアクセス用（テンプレートやエンジンからアクセスできるように）
     (window as any).__DEBUG_MANAGER__ = this;
     
-    console.log('DebugManager initialized:', this.settings);
   }
 
   /**
@@ -72,7 +71,6 @@ export class DebugManager {
     
     // 設定変更をログ出力
     if (this.settings.logToConsole) {
-      console.log('DebugManager settings updated:', this.settings);
     }
   }
 
@@ -97,7 +95,6 @@ export class DebugManager {
     
     // 設定変更をログ出力
     if (this.settings.logToConsole) {
-      console.log(`DebugManager ${enabled ? 'enabled' : 'disabled'}`);
     }
   }
 
@@ -409,7 +406,6 @@ export class DebugManager {
       activeChar: []
     };
     
-    console.log('DebugManager destroyed');
   }
 }
 

@@ -3,7 +3,6 @@ import { PhraseUnit, CharUnit, WordUnit, HierarchyType } from '../types/types';
 import AnimationInstance from './AnimationInstance';
 import { IAnimationTemplate } from '../types/types';
 import { TemplateManager } from './TemplateManager';
-import { ParameterManager } from './ParameterManager';
 
 export class InstanceManager {
   private app: PIXI.Application;
@@ -25,7 +24,7 @@ export class InstanceManager {
   private templateAssignments: Map<string, string> = new Map();
   private defaultTemplateId: string = '';
   private templateManager: TemplateManager | null = null;
-  private parameterManager: ParameterManager | null = null;
+  private parameterManagerV2: any = null; // ParameterManagerV2への参照
   
   // 前回のログ出力時間
   private lastLogTime: number = 0;
@@ -47,7 +46,6 @@ export class InstanceManager {
     
     // メインコンテナの初期位置を左上(0,0)に設定
     this.mainContainer.position.set(0, 0);
-    console.log(`InstanceManager: メインコンテナの初期位置を設定: (${this.mainContainer.position.x}, ${this.mainContainer.position.y})`);
     
     // グローバル参照としてメインコンテナを保存
     (window as any).__MAIN_CONTAINER__ = this.mainContainer;
@@ -57,7 +55,6 @@ export class InstanceManager {
   private throttledLog(message: string) {
     const now = Date.now();
     if (now - this.lastLogTime > InstanceManager.LOG_INTERVAL_MS) {
-      console.log(message);
       this.lastLogTime = now;
     }
   }
@@ -88,11 +85,6 @@ export class InstanceManager {
 
   // 歌詞フレーズをロードして階層的なコンテナ構造を生成
   loadPhrases(phrases: PhraseUnit[], charPositions: Map<string, { x: number, y: number }>) {
-    console.log('InstanceManager: loadPhrases開始', { 
-      phrasesCount: phrases.length, 
-      charPositionsSize: charPositions.size 
-    });
-    
     // 既存のインスタンスをクリア
     this.clearAllInstances();
     
@@ -127,13 +119,6 @@ export class InstanceManager {
         });
       }
     });
-    
-    // サマリーログを制限
-    console.log('InstanceManager: loadPhrases完了', {
-      phraseInstancesCount: this.phraseInstances.size,
-      wordInstancesCount: this.wordInstances.size,
-      charInstancesCount: this.charInstances.size
-    });
   }
 
   // フレーズインスタンスを作成
@@ -143,9 +128,13 @@ export class InstanceManager {
       let template = this.template;
       let params = { ...this.defaultParams };
       
-      if (this.templateManager && this.parameterManager) {
+      if (this.templateManager) {
         template = this.templateManager.getTemplateForObject(phrase.id);
-        params = this.parameterManager.getEffectiveParams(phrase.id, this.templateManager.getDefaultTemplateId());
+        
+        // V2でパラメータを取得
+        if (this.parameterManagerV2) {
+          params = this.parameterManagerV2.getParameters(phrase.id);
+        }
       }
       
       // フレーズコンテナを作成
@@ -201,6 +190,12 @@ export class InstanceManager {
         return null;
       }
       
+      // フレーズインスタンスのコンテナが存在することを確認
+      if (!phraseInstance.container) {
+        console.error(`フレーズインスタンスのコンテナがnullです: ${phraseId}`);
+        return null;
+      }
+      
       // 親コンテナに名前を設定して調査のためのデバッグ情報を追加
       (phraseInstance.container as any).name = `phrase_container_${phraseId}`;
       
@@ -211,29 +206,31 @@ export class InstanceManager {
       // 重要: 単語コンテナを親フレーズコンテナに追加
       phraseInstance.container.addChild(wordContainer);
       
-      // 親の変換行列を明示的に更新
-      phraseInstance.container.updateTransform();
-      wordContainer.updateTransform();
+      // 変換行列の更新は自動で行われるため、明示的な呼び出しは不要
+      // （PIXIの内部処理で適切なタイミングで更新される）
 
       // テンプレート継承ロジックの改善
       let template = this.template;
       let params = { ...this.defaultParams };
       
-      if (this.templateManager && this.parameterManager) {
+      if (this.templateManager) {
         // 単語レベルのテンプレートを取得（フレーズからの継承を含む）
         template = this.templateManager.getTemplateForObject(word.id);
-        params = this.parameterManager.getEffectiveParams(word.id, this.templateManager.getDefaultTemplateId());
+        
+        // V2専用
+        if (this.parameterManagerV2) {
+          params = this.parameterManagerV2.getParameters(word.id);
+        }
         
         // デバッグログは完全に無効化
         // if (import.meta.env.DEV && word.id.endsWith('_0')) {
-        //   console.log(`単語インスタンス作成: ${word.id}, 継承テンプレート: ${template === this.templateManager.getTemplateForObject(phraseId) ? 'フレーズから継承' : '独自'}`);
         // }
       }
       
       // 単語レベルのパラメータを取得とフレーズ情報を追加
       const wordParams = {
-        ...this.defaultParams,
-        ...(word.params || {}),
+        ...params, // ParameterManagerV2から取得した正しいパラメータを使用
+        // V2完全移行: word.paramsは無視する（レガシー互換性を削除）
         id: word.id, // IDを明示的に設定
         chars: word.chars, // 文字データを渡す
         wordIndex: wordIndex, // 単語インデックスを追加
@@ -294,30 +291,26 @@ export class InstanceManager {
       // 文字コンテナを親単語コンテナに追加
       wordInstance.container.addChild(charContainer);
       
-      // 変換行列を明示的に更新
-      charContainer.updateTransform();
+      // 変換行列の更新は自動で行われるため、明示的な呼び出しは不要
       
       // テンプレート継承ロジックの改善
       let template = this.template;
       let params = { ...this.defaultParams };
       
-      if (this.templateManager && this.parameterManager) {
+      if (this.templateManager) {
         // 文字レベルのテンプレートを取得（階層継承を含む）
         template = this.templateManager.getTemplateForObject(char.id);
-        params = this.parameterManager.getEffectiveParams(char.id, this.templateManager.getDefaultTemplateId());
         
-        // デバッグログは完全に無効化
-        // if (import.meta.env.DEV && char.id.endsWith('_char_0')) {
-        //   const phraseId = this.getParentObjectId(wordId);
-        //   const phraseTemplate = phraseId ? this.templateManager.getTemplateForObject(phraseId) : null;
-        //   console.log(`文字インスタンス作成: ${char.id}, テンプレート継承: ${template === phraseTemplate ? 'フレーズから継承' : '独自'}`);
-        // }
+        // V2専用
+        if (this.parameterManagerV2) {
+          params = this.parameterManagerV2.getParameters(char.id);
+        }
       }
       
       // 文字レベルのパラメータを取得し、フレーズ情報を追加
       const charParams = {
-        ...this.defaultParams,
-        ...(char.params || {}),
+        ...params, // ParameterManagerV2から取得した正しいパラメータを使用
+        // V2完全移行: char.paramsは無視する（レガシー互換性を削除）
         id: char.id, // IDを明示的に設定
         // 文字カウント情報をパラメータに追加
         charIndex: char.charIndex,
@@ -357,17 +350,20 @@ export class InstanceManager {
     }
   }
   
-  // 親オブジェクトIDを取得するヘルパーメソッド
+  // 親オブジェクトIDを取得するヘルパーメソッド（正規表現による堅牢な実装）
   private getParentObjectId(objectId: string): string | null {
-    // IDの形式: phrase_0_word_1_char_2
-    const parts = objectId.split('_');
+    // 文字ID: 任意の文字列_char_数字または任意文字列 → 親は単語
+    const charPattern = /^(.+)_char_(?:\d+|.+)$/;
+    const charMatch = objectId.match(charPattern);
+    if (charMatch) {
+      return charMatch[1]; // 単語IDを返す
+    }
     
-    if (parts.length >= 4 && parts[parts.length - 2] === 'char') {
-      // 文字の場合、親は単語
-      return parts.slice(0, parts.length - 2).join('_');
-    } else if (parts.length >= 4 && parts[parts.length - 2] === 'word') {
-      // 単語の場合、親はフレーズ
-      return parts.slice(0, parts.length - 2).join('_');
+    // 単語ID: 任意の文字列_word_数字または任意文字列 → 親はフレーズ
+    const wordPattern = /^(.+)_word_(?:\d+|.+)$/;
+    const wordMatch = objectId.match(wordPattern);
+    if (wordMatch) {
+      return wordMatch[1]; // フレーズIDを返す
     }
     
     return null;
@@ -389,12 +385,10 @@ export class InstanceManager {
   
   // オブジェクトとその子要素を再帰的に更新（改善版）
   updateInstanceAndChildren(objectId: string): void {
-    if (!this.templateManager || !this.parameterManager) {
-      console.warn('TemplateManager または ParameterManager が未設定のため、インスタンス更新をスキップします');
+    if (!this.templateManager) {
+      console.warn('TemplateManager が未設定のため、インスタンス更新をスキップします');
       return;
     }
-    
-    console.log(`=== 階層更新開始: ${objectId} ===`);
     
     // 対象インスタンスを取得
     const instance = this.instances.get(objectId);
@@ -405,38 +399,49 @@ export class InstanceManager {
     
     // テンプレートとパラメータを取得 - 階層継承を考慮
     const template = this.templateManager.getTemplateForObject(objectId);
-    const params = this.parameterManager.getEffectiveParams(
-      objectId, 
-      this.templateManager.getDefaultTemplateId()
-    );
     
-    // テンプレート継承情報をログ出力
-    const directAssignment = this.templateManager.getAssignments().has(objectId);
-    const parentId = this.getParentObjectId(objectId);
-    const inheritedFromParent = !directAssignment && parentId && this.templateManager.getAssignments().has(parentId);
+    let params: Record<string, any>;
+    if (this.parameterManagerV2) {
+      params = this.parameterManagerV2.getParameters(objectId);
+    } else {
+      console.warn(`ParameterManagerV2が利用できません: ${objectId}`);
+      return;
+    }
     
-    console.log(`インスタンス更新: ${objectId} (${instance.hierarchyType})`);
-    console.log(`  - 直接割り当て: ${directAssignment ? '有' : '無'}`);
-    console.log(`  - 親から継承: ${inheritedFromParent ? '有' : '無'}`);
-    console.log(`  - 使用テンプレート: ${template === this.templateManager.getTemplateById(this.templateManager.getDefaultTemplateId()) ? 'デフォルト' : '個別設定'}`);
+    // 更新前の状態を記録（デバッグ用）
+    const oldTemplate = instance.template?.constructor?.name || 'Unknown';
+    const oldFont = instance.params?.fontFamily || 'Unknown';
+    const newTemplate = template?.constructor?.name || 'Unknown';
+    const newFont = params.fontFamily;
+    
+    // 重要な変更をログ出力削除済み
+    
+    // 保持すべき特殊パラメータ
+    const preservedParams = {
+      id: instance.params.id,
+      words: instance.params.words,
+      chars: instance.params.chars,
+      charIndex: instance.params.charIndex,
+      totalChars: instance.params.totalChars,
+      totalWords: instance.params.totalWords,
+      wordIndex: instance.params.wordIndex,
+      phrasePhase: instance.params.phrasePhase,
+      phraseStartMs: instance.params.phraseStartMs,
+      phraseEndMs: instance.params.phraseEndMs
+    };
     
     // インスタンスを更新
-    const previousTemplateId = instance.template === this.templateManager.getTemplateById(this.templateManager.getDefaultTemplateId()) ? 'default' : 'custom';
     instance.template = template;
-    instance.params = { ...instance.params, ...params, id: objectId }; // IDを確実に設定
+    instance.params = { ...params, ...preservedParams, id: objectId }; // 確実に適用
     
-    console.log(`  - テンプレート更新: ${previousTemplateId} -> 新テンプレート`);
-    console.log(`  - パラメータ更新: ${Object.keys(params).length}個のパラメータ`);
+    // インスタンス更新完了ログ削除済み
     
     // 子要素を更新 - 階層関係から子要素を特定して再帰的に更新
     const childrenIds = this.getChildrenIds(objectId);
-    console.log(`${objectId} の子要素: [${childrenIds.join(', ')}]`);
     
     for (const childId of childrenIds) {
       this.updateInstanceAndChildren(childId);
     }
-    
-    console.log(`=== 階層更新完了: ${objectId} ===`);
   }
   
   // ひとつのオブジェクトのみ更新するメソッドを修正
@@ -454,7 +459,6 @@ export class InstanceManager {
   // 階層的な更新処理
   update(nowMs: number) {
     // Note: update開始ログは頻繁すぎるためコメントアウト
-    // console.log('InstanceManager: update開始', { 
     //   currentTime: nowMs,
     //   totalInstances: this.instances.size,
     //   phraseInstances: this.phraseInstances.size,
@@ -516,7 +520,6 @@ export class InstanceManager {
     }
     
     // Note: update完了ログは頻繁すぎるためコメントアウト
-    // console.log('InstanceManager: update完了', { 
     //   activeInstances: activeCount,
     //   activeInstancesSize: this.activeInstances.size
     // });
@@ -608,16 +611,52 @@ export class InstanceManager {
 
   // 既存インスタンスのプロパティのみ更新（配置に影響しないパラメータ変更時）
   updateExistingInstances() {
-    // 各インスタンスのテンプレートパラメータを更新
+    if (import.meta.env.DEV && Math.random() < 0.05) { // 5%の確率でのみ出力
+    }
+    
+    let updatedCount = 0;
     for (const [id, instance] of this.instances.entries()) {
-      if (instance.template && this.parameterManager) {
-        // 現在のパラメータを取得してインスタンスに反映
-        const templateId = this.templateManager?.getDefaultTemplateId() || 'default';
-        const params = this.parameterManager.getEffectiveParams(instance.objectId, templateId);
-        instance.params = { ...instance.params, ...params };
+      if (instance.template && instance.objectId) {
+        let params: Record<string, any> = {};
+        
+        // V2専用: 直接パラメータを取得
+        if (this.parameterManagerV2) {
+          params = this.parameterManagerV2.getParameters(instance.objectId);
+          
+          // デバッグ：重要なパラメータの変更を記録
+          const oldFont = instance.params.fontFamily;
+          const newFont = params.fontFamily;
+          if (oldFont !== newFont && import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
+          }
+        } else {
+          console.warn(`InstanceManager: ParameterManagerV2が利用できません: ${instance.objectId}`);
+          continue;
+        }
+        
+        // 保持すべき特殊パラメータのリスト
+        const preservedParams = {
+          id: instance.params.id,
+          words: instance.params.words,
+          chars: instance.params.chars,
+          charIndex: instance.params.charIndex,
+          totalChars: instance.params.totalChars,
+          totalWords: instance.params.totalWords,
+          wordIndex: instance.params.wordIndex,
+          phrasePhase: instance.params.phrasePhase,
+          phraseStartMs: instance.params.phraseStartMs,
+          phraseEndMs: instance.params.phraseEndMs
+        };
+        
+        // パラメータを更新（特殊パラメータは保持）
+        instance.params = { ...params, ...preservedParams };
+        updatedCount++;
+        
+        // 個別設定フレーズログ削除済み
       }
     }
-    console.log('InstanceManager: 既存インスタンスのパラメータを更新しました');
+    
+    if (import.meta.env.DEV && Math.random() < 0.1) { // 10%の確率でのみ出力
+    }
   }
 
   // すべてのインスタンスをクリア
@@ -637,7 +676,6 @@ export class InstanceManager {
   // テンプレートを更新（歌詞データを保持）（改善版）
   updateTemplate(template: IAnimationTemplate, params: Record<string, any> = {}) {
     try {
-      console.log('InstanceManager: updateTemplateが呼び出されました - テンプレートのみ更新し、歌詞データを保持');
       
       if (!template) {
         console.error('InstanceManager: updateTemplateに渡されたtemplateがnull/undefinedです');
@@ -648,58 +686,86 @@ export class InstanceManager {
       this.defaultParams = { ...this.defaultParams, ...params };
       
       // テンプレートマネージャーが設定されている場合は、個別テンプレート割り当てを考慮
-      if (this.templateManager && this.parameterManager) {
-        console.log('InstanceManager: テンプレートマネージャーが存在するため、個別割り当てを考慮した更新を実行');
+      if (this.templateManager) {
         
         // 個別割り当てを考慮した更新
         let updateCount = 0;
         for (const [instanceId, instance] of this.instances.entries()) {
           // 個別に割り当てられたテンプレートを取得
           const assignedTemplate = this.templateManager.getTemplateForObject(instanceId);
-          const effectiveParams = this.parameterManager.getEffectiveParams(
-            instanceId, 
-            this.templateManager.getDefaultTemplateId()
-          );
           
-          // デバッグ：phrase_2の場合のみパラメータをログ出力
-          if (instanceId === 'phrase_2') {
-            console.log(`[InstanceManager Debug] phrase_2 effectiveParams:`, effectiveParams);
+          
+          let effectiveParams: Record<string, any>;
+          if (this.parameterManagerV2) {
+            effectiveParams = this.parameterManagerV2.getParameters(instanceId);
+          } else {
+            console.warn(`ParameterManagerV2が利用できません: ${instanceId}`);
+            continue;
           }
           
           // インスタンスを更新
           instance.template = assignedTemplate;
-          instance.params = { ...instance.params, ...effectiveParams, id: instanceId };
+          
+          
+          // 保持すべき特殊パラメータのリスト
+          const preservedParams = {
+            id: instance.params.id || instanceId,
+            words: instance.params.words,
+            chars: instance.params.chars,
+            charIndex: instance.params.charIndex,
+            totalChars: instance.params.totalChars,
+            totalWords: instance.params.totalWords,
+            wordIndex: instance.params.wordIndex,
+            phrasePhase: instance.params.phrasePhase,
+            phraseStartMs: instance.params.phraseStartMs,
+            phraseEndMs: instance.params.phraseEndMs
+          };
+          
+          // パラメータを更新（特殊パラメータは保持）
+          instance.params = { ...effectiveParams, ...preservedParams };
           
           updateCount++;
         }
         
-        console.log(`InstanceManager: ${updateCount}個のインスタンスを個別テンプレート考慮で更新完了`);
       } else {
-        console.log('InstanceManager: テンプレートマネージャーが未設定のため、従来の更新処理を実行');
         
         // 従来の更新処理（全インスタンスに同じテンプレートを適用）
         let updateCount = 0;
         for (const instance of this.instances.values()) {
           instance.template = template;
           
+          // 保持すべき特殊パラメータのリスト
+          const preservedParams = {
+            id: instance.params.id,
+            words: instance.params.words,
+            chars: instance.params.chars,
+            charIndex: instance.params.charIndex,
+            totalChars: instance.params.totalChars,
+            totalWords: instance.params.totalWords,
+            wordIndex: instance.params.wordIndex,
+            phrasePhase: instance.params.phrasePhase,
+            phraseStartMs: instance.params.phraseStartMs,
+            phraseEndMs: instance.params.phraseEndMs
+          };
+          
           // オブジェクト固有のパラメータを保持しつつ、デフォルトパラメータを更新
           const instanceParamsBeforeUpdate = { ...instance.params };
           const instanceCustomParams = {};
           
-          // オブジェクト固有の設定のみを抽出
+          // オブジェクト固有の設定のみを抽出（特殊パラメータは除外）
+          const specialParamKeys = Object.keys(preservedParams);
           for (const [key, value] of Object.entries(instanceParamsBeforeUpdate)) {
-            if (this.defaultParams[key] !== value) {
+            if (!specialParamKeys.includes(key) && this.defaultParams[key] !== value) {
               instanceCustomParams[key] = value;
             }
           }
           
-          // デフォルトパラメータを適用し、カスタムパラメータで上書き
-          instance.params = { ...this.defaultParams, ...instanceCustomParams };
+          // デフォルトパラメータを適用し、カスタムパラメータと特殊パラメータで上書き
+          instance.params = { ...this.defaultParams, ...instanceCustomParams, ...preservedParams };
           
           updateCount++;
         }
         
-        console.log(`InstanceManager: ${updateCount}個のインスタンスのテンプレートを従来方法で更新完了`);
       }
       
       return true;
@@ -753,7 +819,6 @@ export class InstanceManager {
    * @param scale スケール係数
    */
   setMainContainerScale(scale: number): void {
-    console.log(`InstanceManager: メインコンテナにスケール適用 (${scale})`); 
     
     if (this.mainContainer) {
       // 元の位置とスケールを記録
@@ -763,17 +828,19 @@ export class InstanceManager {
       // コンテナにスケール適用
       this.mainContainer.scale.set(scale, scale);
       
-      console.log(`InstanceManager: スケール適用前=${originalScale}, 適用後=(${this.mainContainer.scale.x}, ${this.mainContainer.scale.y})`); 
-      console.log(`InstanceManager: 位置=${originalPosition} -> (${this.mainContainer.position.x}, ${this.mainContainer.position.y})`); 
     } else {
       console.warn('InstanceManager: mainContainerが存在しないためスケーリングを適用できません');
     }
   }
   
   // テンプレート割り当て情報の更新メソッド追加
-  updateTemplateAssignments(templateManager: TemplateManager, parameterManager: ParameterManager): void {
+  updateTemplateAssignments(templateManager: TemplateManager): void {
     this.templateManager = templateManager;
-    this.parameterManager = parameterManager;
+  }
+  
+  // V2専用設定
+  setParameterManagerV2(parameterManagerV2: any): void {
+    this.parameterManagerV2 = parameterManagerV2;
   }
   
 }

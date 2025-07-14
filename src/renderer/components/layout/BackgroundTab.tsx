@@ -12,8 +12,8 @@ interface BackgroundTabProps {
 const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
   const [backgroundColor, setBackgroundColor] = useState<string>('#000000');
   const [backgroundType, setBackgroundType] = useState<BackgroundType>('color');
-  const [backgroundImageUrl, setBackgroundImageUrl] = useState<string>('');
-  const [backgroundVideoUrl, setBackgroundVideoUrl] = useState<string>('');
+  const [backgroundImagePath, setBackgroundImagePath] = useState<string>('');
+  const [backgroundVideoPath, setBackgroundVideoPath] = useState<string>('');
   const [fitMode, setFitMode] = useState<BackgroundFitMode>('cover');
   const [opacity, setOpacity] = useState<number>(1);
   const [recentVideoFiles, setRecentVideoFiles] = useState<Array<{fileName: string, filePath: string, timestamp: number}>>([]);
@@ -32,11 +32,11 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
       if (currentConfig.backgroundColor) {
         setBackgroundColor(currentConfig.backgroundColor);
       }
-      if (currentConfig.imageUrl) {
-        setBackgroundImageUrl(currentConfig.imageUrl);
+      if (currentConfig.imageFilePath) {
+        setBackgroundImagePath(currentConfig.imageFilePath);
       }
-      if (currentConfig.videoUrl) {
-        setBackgroundVideoUrl(currentConfig.videoUrl);
+      if (currentConfig.videoFilePath) {
+        setBackgroundVideoPath(currentConfig.videoFilePath);
       }
       if (currentConfig.fitMode) {
         setFitMode(currentConfig.fitMode);
@@ -47,7 +47,6 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
       
       // エンジンから現在のステージ設定を取得
       const stageConfig = engine.getStageConfig();
-      console.log('BackgroundTab: エンジンから取得したステージ設定:', stageConfig);
       setCurrentAspectRatio(stageConfig.aspectRatio);
       setCurrentOrientation(stageConfig.orientation);
       
@@ -60,8 +59,8 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
           const config = currentState.backgroundConfig;
           setBackgroundType(config.type);
           if (config.backgroundColor) setBackgroundColor(config.backgroundColor);
-          if (config.imageUrl) setBackgroundImageUrl(config.imageUrl);
-          if (config.videoUrl) setBackgroundVideoUrl(config.videoUrl);
+          if (config.imageFilePath) setBackgroundImagePath(config.imageFilePath);
+          if (config.videoFilePath) setBackgroundVideoPath(config.videoFilePath);
           if (config.fitMode) setFitMode(config.fitMode);
           if (config.opacity !== undefined) setOpacity(config.opacity);
         }
@@ -76,27 +75,19 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
 
   // 背景動画復元イベントリスナー
   useEffect(() => {
-    console.log('BackgroundTab: 背景動画復元イベントリスナーを設定');
     
     const handleBackgroundVideoRestore = async (event: CustomEvent) => {
       const { fileName: originalFileName } = event.detail;
-      console.log(`BackgroundTab: ===== 背景動画復元要求を受信 =====`);
-      console.log(`BackgroundTab: originalFileName: ${originalFileName}`);
-      console.log(`BackgroundTab: engine: ${engine ? '存在' : 'なし'}`);
-      console.log(`BackgroundTab: electronMediaManager.restoreBackgroundVideo: ${electronMediaManager.restoreBackgroundVideo ? '存在' : 'なし'}`);
       
       try {
         if (electronMediaManager.restoreBackgroundVideo) {
-          console.log(`BackgroundTab: 背景動画復元処理開始: ${originalFileName}`);
           const result = await electronMediaManager.restoreBackgroundVideo(originalFileName);
           if (result && engine) {
             const { video, fileName } = result;
-            console.log(`BackgroundTab: 背景動画復元成功、エンジンに設定: ${fileName} (元: ${originalFileName})`);
             // 背景動画を設定（ファイル名も渡す）
             engine.setBackgroundVideoElement(video, fitMode, fileName);
-            setBackgroundVideoUrl('electron://loaded');
+            setBackgroundVideoPath(fileName || 'loaded');
             setBackgroundType('video');
-            console.log(`BackgroundTab: 背景動画復元完了: ${fileName}`);
             
             // プロジェクト状態を保存
             if (engine.projectStateManager) {
@@ -117,22 +108,18 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
       }
     };
 
-    window.addEventListener('visiblyrics:restore-background-video', handleBackgroundVideoRestore as EventListener);
+    window.addEventListener('utavista:restore-background-video', handleBackgroundVideoRestore as EventListener);
     
     return () => {
-      console.log('BackgroundTab: 背景動画復元イベントリスナーを削除');
-      window.removeEventListener('visiblyrics:restore-background-video', handleBackgroundVideoRestore as EventListener);
+      window.removeEventListener('utavista:restore-background-video', handleBackgroundVideoRestore as EventListener);
     };
   }, [engine, fitMode]);
 
   // 最近使用した背景動画ファイルを読み込み（コンポーネント表示時とengine変更時）
   useEffect(() => {
-    console.log('BackgroundTab: useEffect for loading recent video files triggered');
     const loadRecentFiles = async () => {
       try {
-        console.log('BackgroundTab: Calling getRecentFiles for backgroundVideo');
         const files = await electronMediaManager.getRecentFiles('backgroundVideo');
-        console.log('BackgroundTab: Received recent video files:', files);
         setRecentVideoFiles(files);
       } catch (error) {
         console.error('BackgroundTab: Failed to load recent background video files:', error);
@@ -183,13 +170,13 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
           engine.setBackgroundColor(backgroundColor);
           break;
         case 'image':
-          if (backgroundImageUrl) {
-            engine.setBackgroundImage(backgroundImageUrl, fitMode);
+          if (backgroundImagePath) {
+            engine.setBackgroundImage(backgroundImagePath, fitMode);
           }
           break;
         case 'video':
-          if (backgroundVideoUrl) {
-            engine.setBackgroundVideo(backgroundVideoUrl, fitMode);
+          if (backgroundVideoPath) {
+            engine.setBackgroundVideo(backgroundVideoPath, fitMode);
           }
           break;
       }
@@ -215,7 +202,7 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
           const texture = electronMediaManager.createPixiVideoTexture();
           if (texture) {
             engine.setBackgroundTexture(texture, fitMode);
-            setBackgroundImageUrl('electron://loaded');
+            setBackgroundImagePath(fileName || 'loaded');
             
             // プロジェクト状態を保存
             if (engine.projectStateManager) {
@@ -242,20 +229,16 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
         const result = await electronMediaManager.loadBackgroundVideo();
         if (result) {
           const { video, fileName } = result;
-          setBackgroundVideoUrl('electron://loaded');
+          setBackgroundVideoPath(fileName || 'loaded');
           
           // 動画は背景映像のみに使用（音声は常に除外）
           video.muted = true;
           engine.setBackgroundVideoElement(video, fitMode, fileName);
-          console.log(`背景動画を設定しました: ${fileName}。音楽データは音楽タブから別途読み込んでください。`);
           
           // 最近使用したファイルリストを更新（少し遅延を入れて確実に取得）
-          console.log('BackgroundTab: ファイル選択後、最近使用したファイルリストを更新中...');
           setTimeout(async () => {
             const updatedFiles = await electronMediaManager.getRecentFiles('backgroundVideo');
-            console.log('BackgroundTab: 更新された最近使用したファイル:', updatedFiles);
             setRecentVideoFiles(updatedFiles);
-            console.log('BackgroundTab: setState完了');
           }, 100);
           
           // プロジェクト状態を保存
@@ -313,8 +296,8 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
   const handleClearMedia = () => {
     if (engine) {
       engine.clearBackgroundMedia();
-      setBackgroundImageUrl('');
-      setBackgroundVideoUrl('');
+      setBackgroundImagePath('');
+      setBackgroundVideoPath('');
       setBackgroundType('color');
       
       // プロジェクト状態を保存
@@ -340,7 +323,6 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
         });
       }
       
-      console.log(`アスペクト比変更: ${aspectRatio} (${orientation})`);
     }
   };
 
@@ -429,10 +411,10 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
             >
               画像ファイルを選択
             </button>
-            {backgroundImageUrl && (
+            {backgroundImagePath && (
               <div className="media-preview">
                 <img 
-                  src={backgroundImageUrl} 
+                  src={backgroundImagePath} 
                   alt="背景画像プレビュー" 
                   style={{ maxWidth: '200px', maxHeight: '150px', objectFit: 'cover' }}
                 />
@@ -469,12 +451,11 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
                       const result = await electronMediaManager.loadRecentBackgroundVideo(e.target.value);
                       if (result) {
                         const { video, fileName } = result;
-                        setBackgroundVideoUrl('electron://loaded');
+                        setBackgroundVideoPath(fileName || 'loaded');
                         
                         // 動画は背景映像のみに使用（音声は常に除外）
                         video.muted = true;
                         engine.setBackgroundVideoElement(video, fitMode, fileName);
-                        console.log(`最近使用した背景動画を設定しました: ${fileName}`);
                         
                         // 最近使用したファイルリストを更新
                         setTimeout(async () => {
@@ -517,10 +498,10 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
                 </select>
               </div>
             
-            {backgroundVideoUrl && (
+            {backgroundVideoPath && (
               <div className="media-preview">
                 <video 
-                  src={backgroundVideoUrl} 
+                  src={backgroundVideoPath} 
                   style={{ maxWidth: '200px', maxHeight: '150px', objectFit: 'cover' }}
                   muted
                 />

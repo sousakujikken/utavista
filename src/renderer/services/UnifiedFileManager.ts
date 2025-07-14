@@ -19,7 +19,6 @@ export class UnifiedFileManager {
   async saveProject(projectData: ProjectData): Promise<string> {
     try {
       const filePath = await this.electronAPI.saveProject(projectData);
-      console.log('UnifiedFileManager: プロジェクト保存完了:', filePath);
       return filePath;
     } catch (error) {
       console.error('UnifiedFileManager: プロジェクト保存エラー:', error);
@@ -33,7 +32,6 @@ export class UnifiedFileManager {
   async loadProject(): Promise<ProjectData> {
     try {
       const projectData = await this.electronAPI.loadProject();
-      console.log('UnifiedFileManager: プロジェクト読み込み完了:', projectData.name);
       return projectData;
     } catch (error) {
       console.error('UnifiedFileManager: プロジェクト読み込みエラー:', error);
@@ -47,7 +45,6 @@ export class UnifiedFileManager {
   async selectVideoFile(): Promise<MediaFileInfo> {
     try {
       const mediaInfo = await this.electronAPI.selectMedia('video');
-      console.log('UnifiedFileManager: ビデオファイル選択:', mediaInfo.name);
       return mediaInfo;
     } catch (error) {
       console.error('UnifiedFileManager: ビデオファイル選択エラー:', error);
@@ -61,7 +58,6 @@ export class UnifiedFileManager {
   async selectAudioFile(): Promise<MediaFileInfo> {
     try {
       const mediaInfo = await this.electronAPI.selectMedia('audio');
-      console.log('UnifiedFileManager: オーディオファイル選択:', mediaInfo.name);
       return mediaInfo;
     } catch (error) {
       console.error('UnifiedFileManager: オーディオファイル選択エラー:', error);
@@ -70,22 +66,18 @@ export class UnifiedFileManager {
   }
   
   /**
-   * ローカルファイルパスをfile:// URLに変換
+   * ローカルファイルパスの正規化（Electronネイティブ用）
+   * @deprecated URLを使用せず、直接ファイルパスを使用してください
    */
-  getFileURL(localPath: string): string {
+  normalizeFilePath(localPath: string): string {
     if (!localPath) return '';
     
+    // file:// プロトコルを除去
     if (localPath.startsWith('file://')) {
-      return localPath;
+      return localPath.replace(/^file:\/\/\/?/, '');
     }
     
-    // プラットフォーム判定を直接実行
-    const isWindows = this.electronAPI.platform === 'win32';
-    if (isWindows) {
-      return `file:///${localPath.replace(/\\/g, '/')}`;
-    } else {
-      return `file://${localPath}`;
-    }
+    return localPath;
   }
   
   /**

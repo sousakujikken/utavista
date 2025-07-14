@@ -1,0 +1,408 @@
+/* テンプレート追加モーダル */
+.template-add-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.template-add-modal {
+  background: var(--bg-level-0);
+  border-radius: var(--radius-large);
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--border-standard);
+}
+
+.template-add-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--border-standard);
+}
+
+.template-add-modal-header h3 {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+}
+
+/* タブ切り替え */
+.template-add-modal-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-standard);
+  background-color: var(--bg-level-3);
+}
+
+.template-add-modal-tabs .tab-button {
+  flex: 1;
+  padding: var(--space-md) var(--space-md);
+  background: none;
+  border: none;
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--text-quaternary);
+  cursor: pointer;
+  position: relative;
+  transition: var(--transition-normal);
+  font-family: var(--font-primary);
+}
+
+.template-add-modal-tabs .tab-button:hover {
+  color: var(--text-secondary);
+  background-color: var(--bg-level-7);
+}
+
+.template-add-modal-tabs .tab-button.active {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.template-add-modal-tabs .tab-button.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--color-accent);
+}
+
+.template-add-modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--text-quaternary);
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-small);
+  transition: var(--transition-normal);
+}
+
+.template-add-modal-close:hover {
+  background-color: var(--bg-level-7);
+  color: var(--text-secondary);
+}
+
+.template-add-modal-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  background: var(--bg-level-0);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+}
+
+.template-add-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xxl) var(--space-lg);
+  gap: var(--space-md);
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--bg-level-7);
+  border-top: 3px solid var(--color-accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.template-add-error {
+  text-align: center;
+  padding: var(--space-lg);
+  color: #ff6b6b;
+  font-family: var(--font-primary);
+  font-size: var(--text-body);
+}
+
+.template-add-error button {
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background-color: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+  font-family: var(--font-primary);
+  font-size: var(--text-body);
+  transition: var(--transition-normal);
+}
+
+.template-add-empty {
+  text-align: center;
+  padding: var(--space-xxl) var(--space-lg);
+  color: var(--text-muted);
+  font-family: var(--font-primary);
+  font-size: var(--text-body);
+}
+
+.template-add-empty-description {
+  font-size: var(--text-small);
+  margin-top: var(--space-sm);
+  opacity: 0.8;
+  color: var(--text-muted);
+}
+
+.template-add-description {
+  margin-bottom: var(--space-lg);
+}
+
+.template-add-description p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+  font-family: var(--font-primary);
+}
+
+.template-add-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  padding: var(--space-md);
+  background-color: var(--bg-level-3);
+  border-radius: var(--radius-medium);
+  border: 1px solid var(--border-subtle);
+}
+
+.template-add-control-btn {
+  padding: var(--space-xs) var(--space-md);
+  background-color: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+  font-size: var(--text-body);
+  font-family: var(--font-primary);
+  transition: var(--transition-normal);
+}
+
+.template-add-control-btn:hover:not(:disabled) {
+  background-color: var(--color-accent-hover);
+}
+
+.template-add-control-btn:disabled {
+  background-color: var(--bg-level-7);
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.template-add-selection-count {
+  margin-left: auto;
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+}
+
+.template-add-list {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.template-add-item {
+  display: flex;
+  align-items: flex-start;
+  padding: 16px;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.template-add-item:last-child {
+  border-bottom: none;
+}
+
+.template-add-item:hover {
+  background-color: #f8f9fa;
+}
+
+.template-add-item.selected {
+  background-color: #e3f2fd;
+  border-left: 4px solid #007acc;
+}
+
+.template-add-checkbox {
+  margin-right: 12px;
+  margin-top: 2px;
+}
+
+.template-add-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.template-add-info {
+  flex: 1;
+}
+
+.template-add-name {
+  font-weight: 600;
+  font-size: 16px;
+  color: #333;
+  margin-bottom: 6px;
+}
+
+.template-add-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: #666;
+}
+
+.template-add-class,
+.template-add-file {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  background-color: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.template-add-status {
+  font-size: 13px;
+  color: #666;
+  font-style: italic;
+}
+
+.template-add-badge {
+  background-color: #6c757d;
+  color: white;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-left: 8px;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.template-add-item.no-json {
+  background-color: #f8f9fa;
+}
+
+.template-add-item.no-json:hover {
+  background-color: #e9ecef;
+}
+
+.template-add-item.no-json.selected {
+  background-color: #e9ecef;
+  border-left-color: #6c757d;
+}
+
+.template-add-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 20px;
+  border-top: 1px solid #eee;
+  background-color: #f8f9fa;
+}
+
+.template-add-modal-cancel,
+.template-add-modal-confirm {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.template-add-modal-cancel {
+  background-color: #f5f5f5;
+  color: #666;
+}
+
+.template-add-modal-cancel:hover:not(:disabled) {
+  background-color: #eee;
+}
+
+.template-add-modal-confirm {
+  background-color: #007acc;
+  color: white;
+}
+
+.template-add-modal-confirm:hover:not(:disabled) {
+  background-color: #005a9e;
+}
+
+.template-add-modal-confirm:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.template-add-modal-remove {
+  background-color: #dc3545;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.template-add-modal-remove:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
+.template-add-modal-remove:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 640px) {
+  .template-add-modal {
+    width: 95%;
+    max-height: 90vh;
+  }
+  
+  .template-add-modal-header,
+  .template-add-modal-content,
+  .template-add-modal-footer {
+    padding: 16px;
+  }
+  
+  .template-add-controls {
+    flex-wrap: wrap;
+  }
+  
+  .template-add-selection-count {
+    margin-left: 0;
+    width: 100%;
+    text-align: center;
+    margin-top: 8px;
+  }
+}

@@ -38,7 +38,6 @@ const ZoomControls: React.FC<ZoomControlsProps> = ({
     if (engine && engine.canUndo()) {
       const success = engine.undo();
       if (success) {
-        console.log('Undo操作が完了しました');
       } else {
         console.error('Undo操作に失敗しました');
       }
@@ -50,7 +49,6 @@ const ZoomControls: React.FC<ZoomControlsProps> = ({
     if (engine && engine.canRedo()) {
       const success = engine.redo();
       if (success) {
-        console.log('Redo操作が完了しました');
       } else {
         console.error('Redo操作に失敗しました');
       }

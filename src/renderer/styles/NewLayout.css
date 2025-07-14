@@ -80,7 +80,7 @@
 
 /* 下段エリア */
 .bottom-area {
-  height: 221px;
+  height: 230px;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -89,9 +89,9 @@
 }
 
 .player-area {
-  height: 61px;
+  height: 50px;
   width: 100%;
-  padding: 8px;
+  padding: 6px;
   box-sizing: border-box;
   background-color: #2a2a2a;
   border-bottom: 1px solid #3a3a3a;

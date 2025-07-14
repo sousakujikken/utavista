@@ -1,7 +1,9 @@
 import * as PIXI from 'pixi.js';
 import { AdvancedBloomFilter } from '@pixi/filter-advanced-bloom';
+import { DropShadowFilter } from 'pixi-filters';
 import { IAnimationTemplate, HierarchyType, AnimationPhase, TemplateMetadata } from '../types/types';
 import { FontService } from '../services/FontService';
+import { TextStyleFactory } from '../utils/TextStyleFactory';
 
 /**
  * イージング関数（ユーティリティ）
@@ -68,6 +70,8 @@ function calculatePhraseWidth(text: string, fontSize: number, charSpacing: numbe
  * 完全表示状態では点滅を停止し、動的周波数制御により滑らかな変化を実現
  */
 export const FlickerFadeTemplate: IAnimationTemplate = {
+  // デバッグ用: テンプレート名
+  _debugTemplateName: 'FlickerFadeTemplate',
   // テンプレートメタデータ
   metadata: {
     name: "FlickerFadeTemplate",
@@ -90,15 +94,12 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
       { name: "fontSize", type: "number", default: 120, min: 12, max: 256, step: 1 },
       { 
         name: "fontFamily", 
-        type: "string", 
-        default: "Arial",
-        get options() {
-          return FontService.getAvailableFonts();
-        }
+        type: "font", 
+        default: "Arial"
       },
       
       // 色設定
-      { name: "defaultTextColor", type: "color", default: "#808080" },
+      { name: "textColor", type: "color", default: "#808080" },
       { name: "activeTextColor", type: "color", default: "#FFFF80" },
       { name: "completedTextColor", type: "color", default: "#FFF7EB" },
       
@@ -139,7 +140,20 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
       { name: "glowBrightness", type: "number", default: 1.2, min: 0.5, max: 3, step: 0.1 },
       { name: "glowBlur", type: "number", default: 6, min: 0.1, max: 20, step: 0.1 },
       { name: "glowQuality", type: "number", default: 8, min: 0.1, max: 20, step: 0.1 },
-      { name: "glowPadding", type: "number", default: 50, min: 0, max: 200, step: 10 }
+      { name: "glowPadding", type: "number", default: 50, min: 0, max: 200, step: 10 },
+      
+      // Shadowエフェクト設定
+      { name: "enableShadow", type: "boolean", default: false },
+      { name: "shadowBlur", type: "number", default: 6, min: 0, max: 50, step: 0.5 },
+      { name: "shadowColor", type: "color", default: "#000000" },
+      { name: "shadowAngle", type: "number", default: 45, min: 0, max: 360, step: 15 },
+      { name: "shadowDistance", type: "number", default: 8, min: 0, max: 100, step: 1 },
+      { name: "shadowAlpha", type: "number", default: 0.8, min: 0, max: 1, step: 0.1 },
+      { name: "shadowOnly", type: "boolean", default: false },
+      
+      // 合成モード設定
+      { name: "blendMode", type: "string", default: "normal",
+        options: ["normal", "add", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion"] }
     ];
   },
 
@@ -188,14 +202,6 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
   ): boolean {
     const textContent = Array.isArray(text) ? text.join('') : text;
     
-    console.log('[FlickerFadeTemplate] animateContainer called:', {
-      hierarchyType,
-      text: textContent.substring(0, 20) + '...',
-      startMs,
-      endMs,
-      nowMs,
-      phase
-    });
     
     container.visible = true;
     this.removeVisualElements!(container);
@@ -230,13 +236,12 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
     phase: AnimationPhase,
     _hierarchyType: HierarchyType
   ): boolean {
-    console.log('[FlickerFadeTemplate] renderPhraseContainer called:', {
-      text: text.substring(0, 20) + '...',
-      startMs,
-      endMs,
-      nowMs,
-      phase
-    });
+    // 特定フレーズのみデバッグログ出力（他は抑制）
+    const targetPhraseId = 'phrase_1751032088180_6jqzrss9m';
+    const currentPhraseId = params.phraseId as string || params.id as string || `phrase_${startMs}_${text.substring(0, 10)}`;
+    const isTargetPhrase = currentPhraseId === targetPhraseId;
+    
+    // デバッグログ削除済み
     // パラメータの取得
     // 新しい段管理パラメータ（MultiLineTextベース）
     const totalLines = params.totalLines as number || 4;
@@ -257,6 +262,16 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
     const glowBlur = params.glowBlur as number || 6;
     const glowQuality = params.glowQuality as number || 8;
     const glowPadding = params.glowPadding as number || 50;
+    
+    const enableShadow = params.enableShadow as boolean ?? false;
+    const shadowBlur = params.shadowBlur as number || 6;
+    const shadowColor = params.shadowColor as string || '#000000';
+    const shadowAngle = params.shadowAngle as number || 45;
+    const shadowDistance = params.shadowDistance as number || 8;
+    const shadowAlpha = params.shadowAlpha as number || 0.8;
+    const shadowOnly = params.shadowOnly as boolean ?? false;
+    
+    const blendMode = params.blendMode as string || 'normal';
 
     // アプリケーションサイズの取得
     const app = (window as any).__PIXI_APP__;
@@ -296,21 +311,6 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
       const debugBaseCenterY = screenHeight / 2;
       const debugTotalHeight = (totalLines - 1) * lineSpacing;
       const debugFirstLineY = debugBaseCenterY - debugTotalHeight / 2;
-      
-      console.log('[FlickerFadeTemplate] Phrase positioning DEBUG (MultiLineText-based):', {
-        phraseId,
-        text: text.substring(0, 20) + '...',
-        lineIndex,
-        totalLines,
-        lineSpacing,
-        baseCenterY: debugBaseCenterY,
-        firstLineY: debugFirstLineY,
-        calculatedY: debugFirstLineY + lineIndex * lineSpacing + phraseOffsetY,
-        startMs,
-        endMs,
-        phase,
-        params: { totalLines, lineSpacing, resetInterval, phraseOffsetY }
-      });
     }
 
     // フレーズの基準位置計算（点滅フェードテキスト2と同じ方式）
@@ -322,50 +322,75 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
     const firstLineY = baseCenterY - totalHeight / 2;
     let centerY = firstLineY + lineIndex * lineSpacing + phraseOffsetY;
 
-    // Glowエフェクトの適用
-    if (enableGlow) {
+    // フィルターの適用
+    const needsPadding = enableGlow || enableShadow;
+    const maxPadding = Math.max(glowPadding, shadowDistance + shadowBlur);
+    
+    if (needsPadding) {
       container.filterArea = new PIXI.Rectangle(
-        -glowPadding,
-        -glowPadding,
-        screenWidth + glowPadding * 2,
-        screenHeight + glowPadding * 2
+        -maxPadding,
+        -maxPadding,
+        screenWidth + maxPadding * 2,
+        screenHeight + maxPadding * 2
       );
-
-      const hasBloomFilter = container.filters && 
-        container.filters.some(filter => filter instanceof AdvancedBloomFilter);
-
-      if (!hasBloomFilter) {
-        const bloomFilter = new AdvancedBloomFilter({
-          threshold: 0.2,
-          bloomScale: glowStrength,
-          brightness: glowBrightness,
-          blur: glowBlur,
-          quality: glowQuality,
-          kernels: null,
-          pixelSize: { x: 1, y: 1 }
-        });
-
-        container.filters = container.filters || [];
-        container.filters.push(bloomFilter);
-      } else {
-        const bloomFilter = container.filters.find(filter => filter instanceof AdvancedBloomFilter) as AdvancedBloomFilter;
-        if (bloomFilter) {
-          bloomFilter.bloomScale = glowStrength;
-          bloomFilter.brightness = glowBrightness;
-          bloomFilter.blur = glowBlur;
-          bloomFilter.quality = glowQuality;
-        }
-      }
     } else {
-      if (container.filters) {
-        container.filters = container.filters.filter(filter => !(filter instanceof AdvancedBloomFilter));
-        if (container.filters.length === 0) {
-          container.filters = null;
-        }
-      }
       container.filterArea = null;
     }
+    
+    // フィルター配列の初期化
+    const filters: PIXI.Filter[] = [];
+    
+    // Shadowエフェクトの適用
+    if (enableShadow) {
+      const shadowFilter = new DropShadowFilter({
+        blur: shadowBlur,
+        color: shadowColor,
+        alpha: shadowAlpha,
+        angle: shadowAngle, // 度のまま使用
+        distance: shadowDistance,
+        quality: 4
+      });
+      // shadowOnlyはプロパティとして後から設定
+      (shadowFilter as any).shadowOnly = shadowOnly;
+      filters.push(shadowFilter);
+    }
+    
+    // Glowエフェクトの適用
+    if (enableGlow) {
+      const bloomFilter = new AdvancedBloomFilter({
+        threshold: 0.2,
+        bloomScale: glowStrength,
+        brightness: glowBrightness,
+        blur: glowBlur,
+        quality: glowQuality,
+        kernels: null,
+        pixelSize: { x: 1, y: 1 }
+      });
+      filters.push(bloomFilter);
+    }
+    
+    // フィルターの設定
+    container.filters = filters.length > 0 ? filters : null;
 
+    // 合成モードの適用
+    const blendModeMap: Record<string, PIXI.BLEND_MODES> = {
+      'normal': PIXI.BLEND_MODES.NORMAL,
+      'add': PIXI.BLEND_MODES.ADD,
+      'multiply': PIXI.BLEND_MODES.MULTIPLY,
+      'screen': PIXI.BLEND_MODES.SCREEN,
+      'overlay': PIXI.BLEND_MODES.OVERLAY,
+      'darken': PIXI.BLEND_MODES.DARKEN,
+      'lighten': PIXI.BLEND_MODES.LIGHTEN,
+      'color-dodge': PIXI.BLEND_MODES.COLOR_DODGE,
+      'color-burn': PIXI.BLEND_MODES.COLOR_BURN,
+      'hard-light': PIXI.BLEND_MODES.HARD_LIGHT,
+      'soft-light': PIXI.BLEND_MODES.SOFT_LIGHT,
+      'difference': PIXI.BLEND_MODES.DIFFERENCE,
+      'exclusion': PIXI.BLEND_MODES.EXCLUSION
+    };
+    
+    container.blendMode = blendModeMap[blendMode] || PIXI.BLEND_MODES.NORMAL;
+    
     // フレーズコンテナを配置
     container.position.set(centerX, centerY);
     container.alpha = 1.0;
@@ -448,8 +473,6 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
     const charSpacing = params.charSpacing as number || 1.0;
     const enableGlow = params.enableGlow as boolean ?? true;
     const glowPadding = params.glowPadding as number || 50;
-
-    // デバッグログを削除（段ずらし以外のログを抑制）
 
     // 単語インデックスと総単語数を取得
     const wordIndex = params.wordIndex as number || 0;
@@ -556,6 +579,11 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
     phase: AnimationPhase,
     _hierarchyType: HierarchyType
   ): boolean {
+    // 特定フレーズの詳細追跡対象
+    const targetPhraseId = 'phrase_1751032088180_6jqzrss9m';
+    const charId = params.id as string || '';
+    const isTargetPhraseChar = charId.startsWith(targetPhraseId);
+    
     const fontSize = params.fontSize as number || 120;
     const fontFamily = params.fontFamily as string;
     if (!fontFamily) {
@@ -574,9 +602,12 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
     const fadeOutVariation = params.fadeOutVariation as number || 800;
     const fadeOutDuration = params.fadeOutDuration as number || 1000;
     const fullDisplayThreshold = params.fullDisplayThreshold as number || 0.85;
-    const defaultTextColor = params.defaultTextColor as string || '#808080';
-    const activeTextColor = params.activeTextColor as string || '#FFFF80';
-    const completedTextColor = params.completedTextColor as string || '#FFF7EB';
+    // 統一色パラメータから取得（個別設定対応）
+    const defaultTextColor = (params.textColor as string) || '#808080';
+    const activeTextColor = (params.activeTextColor as string) || '#FFFF80';
+    const completedTextColor = (params.completedTextColor as string) || '#FFF7EB';
+    
+    // 特定フレーズの文字レンダリング詳細ログ削除済み
 
     // フレーズの終了時刻を取得（なければ単語の終了時刻を使用）
     const phraseEndMs = params.phraseEndMs as number || endMs;
@@ -688,21 +719,19 @@ export const FlickerFadeTemplate: IAnimationTemplate = {
     currentAlpha = Math.max(0, Math.min(1, currentAlpha));
 
     // 文字テキストの描画
-    const textStyle = new PIXI.TextStyle({
+    const textObj = TextStyleFactory.createHighDPIText(text, {
       fontFamily: fontFamily,
       fontSize: fontSize,
-      fill: textColor,
-      align: 'center',
-      fontWeight: 'normal'
+      fill: textColor
     });
-
-    const textObj = new PIXI.Text(text, textStyle);
     textObj.anchor.set(0.5, 0.5);
     textObj.position.set(0, 0);
     textObj.alpha = currentAlpha;
 
     container.addChild(textObj);
     container.visible = currentAlpha > 0;
+
+    // 特定フレーズの文字描画完了ログ削除済み
 
     return true;
   },

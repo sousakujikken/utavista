@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import HierarchicalMarker from '../timeline/HierarchicalMarker';
 import WaveformPanel from './WaveformPanel';
 import { PhraseUnit, WordUnit, CharUnit, IAnimationTemplate } from '../../types/types';
@@ -6,6 +6,7 @@ import { MarkerLevel, SelectionState } from '../timeline/types/HierarchicalMarke
 import { getMarkerLevel, getParentObjectId, MIN_DURATIONS, calculateBlockConstraints } from '../timeline/MarkerConstraints';
 import { getCurrentTimeMarkerStyle, getTimeIndicatorStyle, getDragSelectionStyle } from '../timeline/MarkerStyles';
 import Engine from '../../engine/Engine';
+import { ViewportManager } from '../../utils/ViewportManager';
 import '../../styles/components.css';
 
 // ズームレベルの定義（ピクセル密度: ms per pixel）
@@ -19,6 +20,7 @@ interface TimelinePanelProps {
   viewStart?: number;
   viewDuration?: number;
   zoomLevel?: number;
+  viewportManager?: ViewportManager;
 }
 
 const TimelinePanel: React.FC<TimelinePanelProps> = ({ 
@@ -28,6 +30,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
   template,
   viewStart: externalViewStart,
   viewDuration: externalViewDuration,
+  viewportManager,
   zoomLevel: externalZoomLevel
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,6 +104,22 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
   }
   
   const timelineWidth = Math.max(width, duration / msPerPixel);
+  
+  // viewStartが変更されたときに実際のスクロール位置を更新
+  useEffect(() => {
+    if (timelineAreaRef.current && externalViewStart !== undefined && msPerPixel > 0) {
+      // viewStartをピクセル位置に変換
+      const scrollPosition = externalViewStart / msPerPixel;
+      
+      // スクロール位置を設定（スムーズスクロール）
+      if (Math.abs(timelineAreaRef.current.scrollLeft - scrollPosition) > 1) {
+        timelineAreaRef.current.scrollTo({
+          left: scrollPosition,
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [externalViewStart, msPerPixel]);
 
   /**
    * Undo状態保存
@@ -113,13 +132,12 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
         lyricsData: JSON.parse(JSON.stringify(lyrics)),
         currentTime: currentTime,
         templateAssignments: engine.templateManager.exportAssignments(),
-        globalParams: engine.parameterManager.getGlobalParams(),
-        objectParams: engine.parameterManager.exportParameters().objects || {},
+        globalParams: engine.parameterManager.getGlobalDefaults(),
+        objectParams: engine.parameterManager.exportCompressed().phrases || {},
         defaultTemplateId: engine.templateManager.getDefaultTemplateId()
       });
       
       engine.projectStateManager.saveBeforeLyricsChange(operationType, objectId);
-      console.log(`TimelinePanel: Undo状態保存完了 - ${operationType} (${objectId || 'グローバル'})`);
     } catch (error) {
       console.error('TimelinePanel: Undo状態保存エラー:', error);
     }
@@ -222,7 +240,6 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
       });
       window.dispatchEvent(multiEvent);
       
-      console.log('TimelinePanel: オブジェクト選択', newSelectedIds, newSelectedLevel);
     } catch (error) {
       console.error('イベント発火エラー:', error);
     }
@@ -308,7 +325,6 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
     // 操作タイプが変わった場合はリセット
     if (dragState.operationType !== operationType) {
       if (import.meta.env.DEV) {
-        console.log(`[MultiDrag] 操作タイプ変更: ${dragState.operationType} → ${operationType}`);
       }
       dragState.operationType = operationType;
       dragState.totalDeltaMs = 0;
@@ -760,7 +776,6 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
     
     // デバッグログ
     if (import.meta.env.DEV) {
-      console.log(`[ResizeToSelectedMarkers] operation: ${operationType}, deltaMs: ${deltaMs.toFixed(1)}, blockStart: ${blockStart} → ${newBlockStart}, blockEnd: ${blockEnd} → ${newBlockEnd}, scaleFactor: ${scaleFactor.toFixed(3)}`);
     }
     
     // 各マーカーをブロック内で比例スケーリング
@@ -936,7 +951,6 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
     lastOperationRef.current = null;
     
     if (import.meta.env.DEV) {
-      console.log(`[DragStart] ${unitId} (${operationType}) - 状態リセット完了`);
     }
   };
 
@@ -962,17 +976,40 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
   useEffect(() => {
     if (engine) {
       const { lyrics: engineLyrics } = engine.getTimelineData();
-      console.log('TimelinePanel: 歌詞データを取得しました');
       setLyrics(JSON.parse(JSON.stringify(engineLyrics)));
       
       const handleTimelineUpdated = (event: CustomEvent) => {
-        setLyrics(JSON.parse(JSON.stringify(event.detail.lyrics)));
+        // データの存在チェックを追加
+        if (event.detail && event.detail.lyrics) {
+          try {
+            setLyrics(JSON.parse(JSON.stringify(event.detail.lyrics)));
+          } catch (error) {
+            console.error('TimelinePanel: 歌詞データのパースに失敗しました', error);
+          }
+        } else {
+          console.warn('TimelinePanel: timeline-updatedイベントにlyricsデータが含まれていません', event.detail);
+        }
+      };
+      
+      // アクティベーション状態の変更をリスン
+      const handleObjectsActivated = () => {
+        // マーカーの再レンダリングをトリガーするために状態を更新
+        setLyrics(prev => [...prev]);
+      };
+      
+      const handleObjectsDeactivated = () => {
+        // マーカーの再レンダリングをトリガーするために状態を更新
+        setLyrics(prev => [...prev]);
       };
       
       window.addEventListener('timeline-updated', handleTimelineUpdated as EventListener);
+      window.addEventListener('objects-activated', handleObjectsActivated as EventListener);
+      window.addEventListener('objects-deactivated', handleObjectsDeactivated as EventListener);
       
       return () => {
         window.removeEventListener('timeline-updated', handleTimelineUpdated as EventListener);
+        window.removeEventListener('objects-activated', handleObjectsActivated as EventListener);
+        window.removeEventListener('objects-deactivated', handleObjectsDeactivated as EventListener);
       };
     } else {
       console.warn('TimelinePanel: Engine インスタンスが利用できません。モックデータを使用します。');
@@ -1047,36 +1084,82 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
     }
   }, [engine, totalDuration]);
 
-  // 現在の時間位置のマーカー
-  const currentTimePosition = (currentTime / duration) * timelineWidth;
-  
-  // 現在の再生位置に自動スクロール
-  useEffect(() => {
-    if (timelineAreaRef.current) {
-      const scrollContainer = timelineAreaRef.current;
-      const containerWidth = scrollContainer.clientWidth;
-      const scrollLeft = scrollContainer.scrollLeft;
-      const scrollRight = scrollLeft + containerWidth;
-      
-      if (currentTimePosition < scrollLeft || currentTimePosition > scrollRight - 50) {
-        const targetScroll = Math.max(0, Math.min(
-          currentTimePosition - containerWidth / 2,
-          timelineWidth - containerWidth
-        ));
-        scrollContainer.scrollTo({
-          left: targetScroll,
-          behavior: 'smooth'
-        });
-      }
+  // 現在の時間位置のマーカー（修正版）
+  const currentTimePosition = useMemo(() => {
+    // ViewportManagerは相対位置を返すので、絶対位置に変換
+    let position = 0;
+    if (externalViewStart !== undefined && msPerPixel > 0) {
+      position = currentTime / msPerPixel;
+    } else {
+      // フォールバック
+      position = (currentTime / duration) * timelineWidth;
     }
-  }, [currentTimePosition, timelineWidth]);
+    
+    // CSSの padding-left: 10px を考慮してオフセットを調整
+    // これにより波形エリアのプレイヘッドとマーカーエリアのプレイヘッドが正確に位置合わせされる
+    return position + 10;
+  }, [currentTime, duration, timelineWidth, externalViewStart, msPerPixel]);
+  
+  // 現在時間が表示範囲内かチェック
+  const isCurrentTimeVisible = useMemo(() => {
+    if (viewportManager) {
+      return viewportManager.isTimeVisible(currentTime);
+    }
+    return true; // フォールバック
+  }, [viewportManager, currentTime]);
+  
+  // マーカー位置の統一的計算関数（修正版）
+  const getMarkerPosition = (timeMs: number): number => {
+    // 絶対位置を返す
+    let position = 0;
+    if (msPerPixel > 0) {
+      position = timeMs / msPerPixel;
+    } else {
+      // フォールバック
+      position = (timeMs / duration) * timelineWidth;
+    }
+    
+    // CSSの padding-left: 10px を考慮してオフセットを調整
+    return position + 10;
+  };
+  
+  // 時間からピクセルへの変換関数
+  const pixelToTime = (pixel: number): number => {
+    // CSSの padding-left: 10px を考慮してオフセットを調整
+    const adjustedPixel = pixel - 10;
+    
+    if (viewportManager) {
+      return viewportManager.pixelToTime(adjustedPixel);
+    }
+    // フォールバック：既存の計算方法
+    return (adjustedPixel / timelineWidth) * duration;
+  };
+  
+  // 現在の再生位置に自動スクロール（NewLayout.tsxで統一管理されるため無効化）
+  // useEffect(() => {
+  //   if (timelineAreaRef.current) {
+  //     const scrollContainer = timelineAreaRef.current;
+  //     const containerWidth = scrollContainer.clientWidth;
+  //     const scrollLeft = scrollContainer.scrollLeft;
+  //     const scrollRight = scrollLeft + containerWidth;
+  //     
+  //     if (currentTimePosition < scrollLeft || currentTimePosition > scrollRight - 50) {
+  //       const targetScroll = Math.max(0, Math.min(
+  //         currentTimePosition - containerWidth / 2,
+  //         timelineWidth - containerWidth
+  //       ));
+  //       scrollContainer.scrollTo({
+  //         left: targetScroll,
+  //         behavior: 'smooth'
+  //       });
+  //     }
+  //   }
+  // }, [currentTimePosition, timelineWidth]);
 
   // フォースアップデート
   const forceUpdate = () => {
     if (engine) {
       const { lyrics: engineLyrics } = engine.getTimelineData();
-      console.log('TimelinePanel: 最新データ');
-      console.log(engineLyrics);
       setLyrics([...engineLyrics]);
     }
   };
@@ -1183,7 +1266,6 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
         targetLevel = 'char';
       }
       
-      console.log('選択された行:', targetLevel);
       
       let selectedIds: string[] = [];
       
@@ -1271,41 +1353,50 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
     lastOperationRef.current = null;
     
     if (import.meta.env.DEV) {
-      console.log(`[DragEnd] 全状態リセット完了`);
     }
   };
 
   return (
     <div className="timeline-panel" ref={containerRef}>
-      <div 
-        className="timeline-area three-rows" 
-        ref={timelineAreaRef}
-        onMouseDown={handleTimelineMouseDown}
-        onMouseMove={handleTimelineMouseMove}
-        onMouseUp={handleTimelineMouseUp}
-        onMouseLeave={() => {
-          if (isDragSelecting) {
-            setIsDragSelecting(false);
-          }
-          // ドラッグ終了時に全ての状態をリセット
-          const dragState = multiDragStateRef.current;
-          dragState.isActive = false;
-          dragState.operationType = null;
-          dragState.selectedIds = [];
-          dragState.selectedLevel = null;
-          dragState.initialPositions.clear();
-          dragState.totalDeltaMs = 0;
-          dragState.lastUpdateTime = 0;
-          dragState.isLocked = false;
-          
-          // レガシーも同時にリセット
-          setCurrentDragMarkerId(null);
-          dragThrottleRef.current = 0;
-          multiUpdateLockRef.current = false;
-          lastOperationRef.current = null;
-        }}
-      >
-        <div className="timeline-content" style={{ width: `${timelineWidth}px`, position: 'relative' }}>
+      <div className="timeline-container">
+        {/* 左側の固定ラベル領域 */}
+        <div className="timeline-labels">
+          <div className="label-item waveform-label">波形</div>
+          <div className="label-item phrase-label">フレーズ</div>
+          <div className="label-item word-label">単語</div>
+          <div className="label-item char-label">文字</div>
+        </div>
+        
+        {/* 右側のスクロール可能タイムライン領域 */}
+        <div 
+          className="timeline-area three-rows" 
+          ref={timelineAreaRef}
+          onMouseDown={handleTimelineMouseDown}
+          onMouseMove={handleTimelineMouseMove}
+          onMouseUp={handleTimelineMouseUp}
+          onMouseLeave={() => {
+            if (isDragSelecting) {
+              setIsDragSelecting(false);
+            }
+            // ドラッグ終了時に全ての状態をリセット
+            const dragState = multiDragStateRef.current;
+            dragState.isActive = false;
+            dragState.operationType = null;
+            dragState.selectedIds = [];
+            dragState.selectedLevel = null;
+            dragState.initialPositions.clear();
+            dragState.totalDeltaMs = 0;
+            dragState.lastUpdateTime = 0;
+            dragState.isLocked = false;
+            
+            // レガシーも同時にリセット
+            setCurrentDragMarkerId(null);
+            dragThrottleRef.current = 0;
+            multiUpdateLockRef.current = false;
+            lastOperationRef.current = null;
+          }}
+        >
+          <div className="timeline-content" style={{ width: `${timelineWidth}px`, position: 'relative' }}>
           {/* 波形表示 */}
           <div className="waveform-wrapper">
             <WaveformPanel 
@@ -1314,6 +1405,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
               viewStart={externalViewStart ?? 0}
               viewDuration={externalViewDuration}
               engine={engine}
+              viewportManager={viewportManager}
             />
           </div>
           
@@ -1349,6 +1441,9 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                 isRightOuterMarker = phrase.id === rightmostPhrase.id;
               }
               
+              // V2統一管理で個別設定状態を取得
+              const isActivated = engine?.parameterManager?.isIndividualSettingEnabled?.(phrase.id) || false;
+              
               return (
                 <HierarchicalMarker
                   key={phrase.id}
@@ -1356,10 +1451,12 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                   level="phrase"
                   duration={duration}
                   timelineWidth={timelineWidth}
+                  msPerPixel={msPerPixel}
                   isSelected={isSelected}
                   multiSelected={isMultiSelected}
                   isLeftOuterMarker={isLeftOuterMarker}
                   isRightOuterMarker={isRightOuterMarker}
+                  isActivated={isActivated}
                   onUpdate={handleMarkerUpdate('phrase')}
                   onMultiUpdate={handleMultiUpdate}
                   onSelectionChange={handleSelectionChange}
@@ -1400,6 +1497,9 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                   isRightOuterMarker = word.id === rightmostWord.id;
                 }
                 
+                // V2統一管理で個別設定状態を取得（単語はフレーズの状態を継承）
+                const isActivated = engine?.parameterManager?.isIndividualSettingEnabled?.(phrase.id) || false;
+                
                 return (
                   <HierarchicalMarker
                     key={word.id}
@@ -1407,11 +1507,13 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     level="word"
                     duration={duration}
                     timelineWidth={timelineWidth}
+                    msPerPixel={msPerPixel}
                     parentConstraints={parentConstraints}
                     isSelected={isSelected}
                     multiSelected={isMultiSelected}
                     isLeftOuterMarker={isLeftOuterMarker}
                     isRightOuterMarker={isRightOuterMarker}
+                    isActivated={isActivated}
                     onUpdate={handleMarkerUpdate('word')}
                     onMultiUpdate={handleMultiUpdate}
                     onSelectionChange={handleSelectionChange}
@@ -1455,6 +1557,9 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     isRightOuterMarker = char.id === rightmostChar.id;
                   }
                   
+                  // V2統一管理で個別設定状態を取得（文字はフレーズの状態を継承）
+                  const isActivated = engine?.parameterManager?.isIndividualSettingEnabled?.(phrase.id) || false;
+                  
                   return (
                     <HierarchicalMarker
                       key={char.id}
@@ -1462,11 +1567,13 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                       level="char"
                       duration={duration}
                       timelineWidth={timelineWidth}
+                      msPerPixel={msPerPixel}
                       parentConstraints={parentConstraints}
                       isSelected={isSelected}
                       multiSelected={isMultiSelected}
                       isLeftOuterMarker={isLeftOuterMarker}
                       isRightOuterMarker={isRightOuterMarker}
+                      isActivated={isActivated}
                       onUpdate={handleMarkerUpdate('char')}
                       onMultiUpdate={handleMultiUpdate}
                       onSelectionChange={handleSelectionChange}
@@ -1536,6 +1643,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
               強制更新
             </button>
           )}
+          </div>
         </div>
       </div>
     </div>

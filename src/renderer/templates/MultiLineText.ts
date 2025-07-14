@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { IAnimationTemplate, HierarchyType, AnimationPhase, TemplateMetadata } from '../types/types';
 import { FontService } from '../services/FontService';
+import { TextStyleFactory } from '../utils/TextStyleFactory';
 
 /**
  * 多角形を描画するためのユーティリティ関数
@@ -589,15 +590,11 @@ export const MultiLineText: IAnimationTemplate = {
     }
     
     // 文字テキストの描画（状態に応じた色設定）
-    const textStyle = new PIXI.TextStyle({
+    const textObj = TextStyleFactory.createHighDPIText(text, {
       fontFamily: fontFamily,
       fontSize: fontSize,
-      fill: textColor,  // 状態に応じた色を適用
-      align: 'center',
-      fontWeight: 'normal'
+      fill: textColor  // 状態に応じた色を適用
     });
-    
-    const textObj = new PIXI.Text(text, textStyle);
     textObj.anchor.set(0.5, 0.5);
     textObj.position.set(0, 0);
     

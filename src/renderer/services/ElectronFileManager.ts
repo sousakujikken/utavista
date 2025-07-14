@@ -15,7 +15,6 @@ export class ElectronFileManager {
   async saveProject(projectData: ProjectData): Promise<string> {
     try {
       const filePath = await this.electronAPI.saveProject(projectData);
-      console.log('Project saved to:', filePath);
       return filePath;
     } catch (error) {
       console.error('Failed to save project:', error);
@@ -26,7 +25,6 @@ export class ElectronFileManager {
   async loadProject(): Promise<ProjectData> {
     try {
       const projectData = await this.electronAPI.loadProject();
-      console.log('Project loaded:', projectData.name);
       return projectData;
     } catch (error) {
       console.error('Failed to load project:', error);
@@ -37,7 +35,6 @@ export class ElectronFileManager {
   async selectVideoFile(): Promise<MediaFileInfo> {
     try {
       const mediaInfo = await this.electronAPI.selectMedia('video');
-      console.log('Video file selected:', mediaInfo.name);
       return mediaInfo;
     } catch (error) {
       console.error('Failed to select video file:', error);
@@ -48,7 +45,6 @@ export class ElectronFileManager {
   async selectAudioFile(): Promise<MediaFileInfo> {
     try {
       const mediaInfo = await this.electronAPI.selectMedia('audio');
-      console.log('Audio file selected:', mediaInfo.name);
       return mediaInfo;
     } catch (error) {
       console.error('Failed to select audio file:', error);

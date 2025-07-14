@@ -141,6 +141,34 @@ const electronAPI = {
 
     getRecentBackgroundVideo: (): Promise<{ success: boolean; files?: any[]; error?: string }> =>
       ipcRenderer.invoke('persistence:get-recent-background-video'),
+    
+    saveFontBlacklist: (blacklist: any[]): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('persistence:save-font-blacklist', blacklist),
+    
+    loadFontBlacklist: (): Promise<{ success: boolean; data?: any; error?: string }> =>
+      ipcRenderer.invoke('persistence:load-font-blacklist'),
+  },
+  
+  // File system utilities
+  checkFileExists: (filePath: string): Promise<boolean> =>
+    ipcRenderer.invoke('fs:check-file-exists', filePath),
+  
+  readFileAsURL: (filePath: string): Promise<string> =>
+    ipcRenderer.invoke('fs:read-file-as-url', filePath),
+  
+  // テンプレートレジストリ関連のAPI
+  template: {
+    readRegistry: (): Promise<string> =>
+      ipcRenderer.invoke('template:read-registry'),
+    
+    writeRegistry: (content: string): Promise<boolean> =>
+      ipcRenderer.invoke('template:write-registry', content),
+    
+    readFile: (fileName: string): Promise<string> =>
+      ipcRenderer.invoke('template:read-file', fileName),
+    
+    listFiles: (): Promise<string[]> =>
+      ipcRenderer.invoke('template:list-files')
   },
   
   // Platform info
@@ -151,7 +179,15 @@ const electronAPI = {
     if (process.env.NODE_ENV === 'development') {
       ipcRenderer.send('dev:open-devtools');
     }
-  }
+  },
+  
+  // システム情報取得
+  getMemoryInfo: (): Promise<any> => 
+    ipcRenderer.invoke('system:getMemoryInfo'),
+  
+  // GPU プロセス デバッグ
+  debugGPUProcesses: (): Promise<any> =>
+    ipcRenderer.invoke('system:debugGPUProcesses')
 };
 
 // Type declaration for renderer process

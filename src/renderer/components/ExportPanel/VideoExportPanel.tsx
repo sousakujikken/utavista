@@ -30,6 +30,7 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
   const [useCustomRange, setUseCustomRange] = useState(false);
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(60000);
+  const [includeMusicTrack, setIncludeMusicTrack] = useState(true);
   
   // 入力フィールドの生の値を保持（入力中の値を保持するため）
   const [startTimeInput, setStartTimeInput] = useState('00:00.000');
@@ -37,12 +38,10 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
   
   // startTimeの変更を監視
   useEffect(() => {
-    console.log('🎬 startTime changed to:', startTime);
   }, [startTime]);
   
   // endTimeの変更を監視
   useEffect(() => {
-    console.log('🎬 endTime changed to:', endTime);
   }, [endTime]);
   // const [filename, setFilename] = useState('animation_export.mp4'); // 廃止：システムダイアログで設定
   const [isExporting, setIsExporting] = useState(false);
@@ -57,7 +56,6 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
 
   // 楽曲の長さをエンジンから取得し、推奨設定を計算
   useEffect(() => {
-    console.log('🔄 useEffect triggered - Dependencies:', { 
       engine: !!engine, 
       quality, 
       customResolution, 
@@ -69,15 +67,12 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
     
     if (engine) {
       const duration = engine.getMaxTime();
-      console.log('📊 Engine duration:', duration, 'Current endTime:', endTime);
       
       // 初期化時のみendTimeを設定
       if (endTime === 60000) {
-        console.log('🎯 Setting initial endTime to duration:', duration);
         setEndTime(duration);
         setEndTimeInput(formatTime(duration));
       } else {
-        console.log('⏭️ Skipping endTime update (not initial value)');
       }
       
       // 推奨バッチ設定を計算
@@ -91,7 +86,8 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
         fileName: 'animation_export.mp4', // 一時的なファイル名（実際の出力では使用されない）
         startTime: useCustomRange ? startTime : 0,
         endTime: useCustomRange ? endTime : duration,
-        includeDebugVisuals
+        includeDebugVisuals,
+        includeMusicTrack
       };
       
       // 推奨出力方法を取得（現在は常にseek-and-snap）
@@ -141,7 +137,8 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
         fileName: 'debug_3sec_animation_export.mp4',
         startTime: startTime,
         endTime: startTime + 3000,
-        includeDebugVisuals: true
+        includeDebugVisuals: true,
+        includeMusicTrack
       };
       
       const outputPath = await engine.videoExporter.startDirectExport(
@@ -173,7 +170,8 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
         fileName: 'debug_15sec_batch_test_animation_export.mp4',
         startTime: startTime,
         endTime: startTime + 15000, // 15秒
-        includeDebugVisuals: true
+        includeDebugVisuals: true,
+        includeMusicTrack
       };
       
       
@@ -228,6 +226,7 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
         startTime: useCustomRange ? startTime : 0,
         endTime: useCustomRange ? endTime : engine.getMaxTime(),
         includeDebugVisuals,
+        includeMusicTrack,
         outputPath: filePath // フルパスを追加
       };
       
@@ -246,35 +245,39 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
   // エクスポートのキャンセル処理
   const handleCancelExport = async () => {
     if (isExporting) {
-      await engine.videoExporter.cancelExport();
-      setIsExporting(false);
+      try {
+        await engine.videoExporter.cancelExport();
+        setIsExporting(false);
+        setProgress(0);
+        setBatchProgress(undefined);
+        setMemoryUsage(undefined);
+        setExportError(null);
+      } catch (error) {
+        console.error('Failed to cancel export:', error);
+        setExportError('エクスポートの中止に失敗しました');
+      }
     }
   };
 
   // 時間を人間が読める形式に変換 (ミリ秒 → MM:SS.mmm)
   const formatTime = useCallback((ms: number): string => {
-    console.log('📝 formatTime called with:', ms);
     const totalSec = ms / 1000;
     const minutes = Math.floor(totalSec / 60);
     const seconds = Math.floor(totalSec % 60);
     const millis = Math.floor((totalSec % 1) * 1000);
     const result = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}`;
-    console.log('📝 formatTime result:', result);
     return result;
   }, []);
 
   // 人間が読める形式から時間に変換 (MM:SS.mmm → ミリ秒)
   const parseTime = useCallback((timeStr: string): { value: number; isValid: boolean } => {
-    console.log('🔍 parseTime called with:', timeStr);
     const parts = timeStr.split(':');
     if (parts.length !== 2) {
-      console.log('🔍 parseTime invalid format (no colon)');
       return { value: 0, isValid: false };
     }
     
     const secParts = parts[1].split('.');
     if (secParts.length !== 2) {
-      console.log('🔍 parseTime invalid format (no dot in seconds)');
       return { value: 0, isValid: false };
     }
     
@@ -284,24 +287,20 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
     
     // 有効性チェック
     if (isNaN(minutes) || isNaN(seconds) || isNaN(millis)) {
-      console.log('🔍 parseTime invalid values (NaN detected)');
       return { value: 0, isValid: false };
     }
     
     if (seconds >= 60 || millis >= 1000) {
-      console.log('🔍 parseTime invalid range (seconds >= 60 or millis >= 1000)');
       return { value: 0, isValid: false };
     }
     
     const result = (minutes * 60 * 1000) + (seconds * 1000) + millis;
-    console.log('🔍 parseTime result:', result, 'isValid: true');
     return { value: result, isValid: true };
   }, []);
 
   // 開始時間変更ハンドラー
   const handleStartTimeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    console.log('⏰ Start time input changed:', value, 'Current startTime:', startTime);
     
     // 入力フィールドの値を常に更新
     setStartTimeInput(value);
@@ -309,17 +308,14 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
     // 有効な値の場合のみ実際のstateを更新
     const parsed = parseTime(value);
     if (parsed.isValid) {
-      console.log('⏰ Setting new startTime:', parsed.value);
       setStartTime(parsed.value);
     } else {
-      console.log('⏰ Invalid input, keeping current startTime:', startTime);
     }
   }, [parseTime, startTime]);
 
   // 終了時間変更ハンドラー
   const handleEndTimeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    console.log('⏰ End time input changed:', value, 'Current endTime:', endTime);
     
     // 入力フィールドの値を常に更新
     setEndTimeInput(value);
@@ -327,10 +323,8 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
     // 有効な値の場合のみ実際のstateを更新
     const parsed = parseTime(value);
     if (parsed.isValid) {
-      console.log('⏰ Setting new endTime:', parsed.value);
       setEndTime(parsed.value);
     } else {
-      console.log('⏰ Invalid input, keeping current endTime:', endTime);
     }
   }, [parseTime, endTime]);
 
@@ -486,6 +480,20 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
         </div>
 
         <div className="export-setting-group">
+          <h3>音声設定</h3>
+          <div className="input-group checkbox">
+            <input
+              type="checkbox"
+              id="include-music"
+              checked={includeMusicTrack}
+              onChange={(e) => setIncludeMusicTrack(e.target.checked)}
+              disabled={isExporting}
+            />
+            <label htmlFor="include-music">読み込んだ音楽を含める</label>
+          </div>
+        </div>
+
+        <div className="export-setting-group">
           <h3>出力範囲</h3>
           
           <div className="input-group checkbox">
@@ -540,13 +548,19 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
 
       {isExporting && (
         <div className="export-progress">
+          <div className="progress-header">
+            <span className="progress-label">エクスポート中...</span>
+            <span className="progress-text">{Math.floor(progress * 100)}%</span>
+          </div>
           <div className="progress-bar">
             <div
               className="progress-bar-fill"
               style={{ width: `${progress * 100}%` }}
             ></div>
           </div>
-          <div className="progress-text">{Math.floor(progress * 100)}%</div>
+          <div className="progress-info">
+            <small>エクスポートを中止するには「エクスポートを中止」ボタンをクリックしてください</small>
+          </div>
         </div>
       )}
 
@@ -557,31 +571,21 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
       )}
 
       <div className="export-actions">
-        {isExporting ? (
-          <button
-            className="cancel-button"
-            onClick={handleCancelExport}
-          >
-            エクスポートを中止
-          </button>
-        ) : (
-          <>
-            <button
-              className="cancel-button"
-              onClick={onClose}
-            >
-              キャンセル
-            </button>
-            {/* デバッグ用テストボタン（非表示化） */}
-          </>
-        )}
         <button
-          className="export-button"
-          onClick={handleExport}
-          disabled={isExporting || (quality === 'CUSTOM' && validateCustomResolution(customResolution.width, customResolution.height) !== null)}
+          className="cancel-button"
+          onClick={isExporting ? handleCancelExport : onClose}
         >
-          {isExporting ? 'エクスポート中...' : 'エクスポート開始'}
+          {isExporting ? 'エクスポートを中止' : 'キャンセル'}
         </button>
+        {!isExporting && (
+          <button
+            className="export-button"
+            onClick={handleExport}
+            disabled={quality === 'CUSTOM' && validateCustomResolution(customResolution.width, customResolution.height) !== null}
+          >
+            エクスポート開始
+          </button>
+        )}
       </div>
     </div>
   );

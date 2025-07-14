@@ -95,7 +95,6 @@ const DebugTab: React.FC<DebugTabProps> = ({ engine, debugInfo: propDebugInfo, t
   useEffect(() => {
     // 座標更新イベントリスナー
     const handleDebugInfoUpdate = (event: any) => {
-      console.log('デバッグタブ: デバッグ情報更新', event.detail);
       
       if (event.detail) {
         // デバッグ情報更新
@@ -113,7 +112,6 @@ const DebugTab: React.FC<DebugTabProps> = ({ engine, debugInfo: propDebugInfo, t
     
     // 設定更新リスナー
     const handleSettingsUpdate = (event: any) => {
-      console.log('デバッグタブ: 設定更新', event.detail);
       
       if (event.detail && event.detail.settings) {
         setDebugSettings(event.detail.settings);

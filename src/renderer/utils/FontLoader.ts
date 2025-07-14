@@ -6,18 +6,33 @@
  */
 
 import { FontInfo } from '../../shared/types';
+import { persistenceService } from '../services/PersistenceService';
 
 export class FontLoader {
   private static loadedFonts: Set<string> = new Set();
+  private static failedFonts: Set<string> = new Set();
   private static styleElement: HTMLStyleElement | null = null;
+  private static loadingPromises: Map<string, Promise<boolean>> = new Map();
+  private static dynamicBlacklist: Set<string> = new Set();
+  private static blacklistLoaded: boolean = false;
+  
+  // 問題のあるフォントのブラックリスト（デフォルトは空）
+  // 環境依存の問題は動的ブラックリストで対応
+  private static PROBLEMATIC_FONTS: string[] = [];
 
   /**
    * 初期化
    */
-  static initialize(): void {
+  static async initialize(): Promise<void> {
     if (!this.styleElement) {
       this.styleElement = document.createElement('style');
       document.head.appendChild(this.styleElement);
+    }
+    
+    // 動的ブラックリストを読み込み（初回のみ）
+    if (!this.blacklistLoaded) {
+      await this.loadDynamicBlacklist();
+      this.blacklistLoaded = true;
     }
   }
 
@@ -32,42 +47,96 @@ export class FontLoader {
       return false;
     }
 
-    // 既に読み込み済みの場合はスキップ
-    if (this.loadedFonts.has(fontInfo.family)) {
-      return true;
-    }
-
-    try {
-      // Electronのfile://プロトコルでフォントファイルにアクセス
-      const fontUrl = `file://${fontInfo.path}`;
-      
-      // CSS @font-face ルールを作成
-      const fontFace = `
-        @font-face {
-          font-family: "${fontInfo.family}";
-          src: url("${fontUrl}") format("${this.getFontFormat(fontInfo.path)}");
-          font-weight: ${fontInfo.weight || 'normal'};
-          font-style: ${fontInfo.style === 'Italic' ? 'italic' : 'normal'};
-        }
-      `;
-
-      // スタイルシートに追加
-      if (this.styleElement) {
-        this.styleElement.textContent += fontFace;
-      }
-
-      // CSS Font Loading APIを使用してフォントの読み込みを確認
-      if ('fonts' in document) {
-        await (document as any).fonts.load(`12px "${fontInfo.family}"`);
-      }
-
-      this.loadedFonts.add(fontInfo.family);
-      return true;
-
-    } catch (error) {
-      console.error(`[FontLoader] フォント読み込みエラー: ${fontInfo.family}`, error);
+    // 問題のあるフォントをスキップ（デフォルトブラックリストと動的ブラックリストの両方をチェック）
+    if (this.PROBLEMATIC_FONTS.some(prob => fontInfo.family.includes(prob)) || 
+        this.dynamicBlacklist.has(fontInfo.family)) {
       return false;
     }
+
+    // フォントの一意なキーを生成（family + weight + style）
+    const fontKey = this.getFontKey(fontInfo);
+    
+    // 既に読み込み済みの場合はスキップ
+    if (this.loadedFonts.has(fontKey)) {
+      return true;
+    }
+    
+    // 既に失敗したフォントの場合はスキップ（サイレント）
+    if (this.failedFonts.has(fontKey)) {
+      return false;
+    }
+    
+    // 現在読み込み中の場合は、その Promise を返す
+    if (this.loadingPromises.has(fontKey)) {
+      return this.loadingPromises.get(fontKey)!;
+    }
+
+    // 読み込み処理をPromiseでラップして、重複を防ぐ
+    const loadPromise = (async () => {
+      try {
+        // Electronのfile://プロトコルでフォントファイルにアクセス
+        const fontUrl = `file://${fontInfo.path}`;
+        
+        // CSS @font-face ルールを作成
+        const fontFace = `
+          @font-face {
+            font-family: "${fontInfo.family}";
+            src: url("${fontUrl}") format("${this.getFontFormat(fontInfo.path)}");
+            font-weight: ${fontInfo.weight || 'normal'};
+            font-style: ${fontInfo.style === 'Italic' ? 'italic' : 'normal'};
+          }
+        `;
+
+        // スタイルシートに追加
+        if (this.styleElement) {
+          this.styleElement.textContent += fontFace;
+        }
+
+        // CSS Font Loading APIを使用してフォントの読み込みを確認
+        // weight と style を含めて正確に指定
+        if ('fonts' in document) {
+          const weight = fontInfo.weight || 'normal';
+          const style = fontInfo.style === 'Italic' ? 'italic' : 'normal';
+          const fontSpec = `${style} ${weight} 12px "${fontInfo.family}"`;
+          
+          try {
+            await (document as any).fonts.load(fontSpec);
+          } catch (loadError) {
+            // Font Loading API のエラーを詳細に記録
+            console.error(`[FontLoader] Font Loading API エラー: ${fontInfo.family} (${weight} ${style})`, loadError);
+            console.error(`[FontLoader] フォント仕様: ${fontSpec}`);
+            console.error(`[FontLoader] フォントURL: ${fontUrl}`);
+            // この時点では致命的エラーとして扱わない（フォールバック機能があるため）
+          }
+        } else {
+          console.warn('[FontLoader] CSS Font Loading API が利用できません');
+        }
+
+        this.loadedFonts.add(fontKey);
+        return true;
+
+      } catch (error) {
+        // 失敗したフォントをキャッシュ
+        this.failedFonts.add(fontKey);
+        // 動的ブラックリストに追加
+        this.dynamicBlacklist.add(fontInfo.family);
+        // エラーログレベルを上げて、詳細情報を含める
+        console.error(`[FontLoader] フォント読み込みエラー: ${fontInfo.family} (${fontInfo.weight} ${fontInfo.style})`, error);
+        console.error(`[FontLoader] フォントパス: ${fontInfo.path}`);
+        
+        // ブラックリストを保存（非同期、エラーは無視）
+        this.saveDynamicBlacklist().catch(() => {});
+        
+        return false;
+      } finally {
+        // 読み込み完了後、Promise を削除
+        this.loadingPromises.delete(fontKey);
+      }
+    })();
+    
+    // Promise をマップに保存
+    this.loadingPromises.set(fontKey, loadPromise);
+    return loadPromise;
   }
 
   /**
@@ -78,16 +147,50 @@ export class FontLoader {
   static async loadSystemFonts(fontInfos: FontInfo[]): Promise<string[]> {
     this.initialize();
     
-    const loadedFonts: string[] = [];
-    const loadPromises = fontInfos.map(async (fontInfo) => {
-      const success = await this.loadSystemFont(fontInfo);
-      if (success) {
-        loadedFonts.push(fontInfo.family);
+    // フォントファイルパスでグループ化して、同じファイルへの同時アクセスを減らす
+    const fontsByPath = new Map<string, FontInfo[]>();
+    fontInfos.forEach(fontInfo => {
+      if (fontInfo.path) {
+        const path = fontInfo.path;
+        if (!fontsByPath.has(path)) {
+          fontsByPath.set(path, []);
+        }
+        fontsByPath.get(path)!.push(fontInfo);
       }
     });
-
-    await Promise.all(loadPromises);
-    return loadedFonts;
+    
+    const loadedFonts: string[] = [];
+    
+    // .ttc ファイルは順次処理、それ以外は並列処理
+    const ttcPaths = Array.from(fontsByPath.keys()).filter(path => path.toLowerCase().endsWith('.ttc'));
+    const otherPaths = Array.from(fontsByPath.keys()).filter(path => !path.toLowerCase().endsWith('.ttc'));
+    
+    // .ttc ファイルのフォントを順次処理
+    for (const ttcPath of ttcPaths) {
+      const fonts = fontsByPath.get(ttcPath)!;
+      for (const fontInfo of fonts) {
+        const success = await this.loadSystemFont(fontInfo);
+        if (success) {
+          loadedFonts.push(fontInfo.family);
+        }
+      }
+    }
+    
+    // その他のフォントは並列処理
+    const otherPromises = otherPaths.flatMap(path => {
+      const fonts = fontsByPath.get(path)!;
+      return fonts.map(async (fontInfo) => {
+        const success = await this.loadSystemFont(fontInfo);
+        if (success) {
+          loadedFonts.push(fontInfo.family);
+        }
+      });
+    });
+    
+    await Promise.all(otherPromises);
+    
+    // 重複を除去して返す
+    return [...new Set(loadedFonts)];
   }
 
   /**
@@ -125,16 +228,56 @@ export class FontLoader {
   }
 
   /**
+   * フォントの一意なキーを生成
+   * @param fontInfo フォント情報
+   * @returns フォントの一意なキー
+   */
+  private static getFontKey(fontInfo: FontInfo): string {
+    const weight = fontInfo.weight || 'normal';
+    const style = fontInfo.style === 'Italic' ? 'italic' : 'normal';
+    return `${fontInfo.family}_${weight}_${style}`;
+  }
+  
+  /**
    * デバッグ情報を出力
    */
   static debug(): void {
-    console.log('[FontLoader] 読み込み済みフォント:');
-    console.log('  数:', this.loadedFonts.size);
-    console.log('  リスト:', Array.from(this.loadedFonts));
-    
     if (this.styleElement) {
-      console.log('  CSS @font-face ルール数:', 
-        (this.styleElement.textContent?.match(/@font-face/g) || []).length);
+      // Check font-face count for debugging
+    }
+  }
+
+  /**
+   * 動的ブラックリストを読み込み
+   */
+  private static async loadDynamicBlacklist(): Promise<void> {
+    try {
+      const data = await persistenceService.loadFontBlacklist();
+      if (data && data.blacklist) {
+        data.blacklist.forEach(entry => {
+          this.dynamicBlacklist.add(entry.fontFamily);
+        });
+      }
+    } catch (error) {
+      console.error('[FontLoader] 動的ブラックリスト読み込みエラー:', error);
+    }
+  }
+  
+  /**
+   * 動的ブラックリストを保存
+   */
+  private static async saveDynamicBlacklist(): Promise<void> {
+    try {
+      const blacklist = Array.from(this.dynamicBlacklist).map(fontFamily => ({
+        fontFamily,
+        fontKey: fontFamily,
+        reason: 'load_error',
+        timestamp: Date.now()
+      }));
+      
+      await persistenceService.saveFontBlacklist(blacklist);
+    } catch (error) {
+      console.error('[FontLoader] 動的ブラックリスト保存エラー:', error);
     }
   }
 
@@ -158,5 +301,27 @@ export class FontLoader {
     } catch (error) {
       console.error('[FontLoader] Electronフォント読み込みエラー:', error);
     }
+  }
+
+  /**
+   * 動的ブラックリストとキャッシュをクリア
+   */
+  static clearBlacklist(): void {
+    this.dynamicBlacklist.clear();
+    this.failedFonts.clear();
+  }
+
+  /**
+   * 現在のブラックリストを取得
+   */
+  static getBlacklist(): string[] {
+    return Array.from(this.dynamicBlacklist);
+  }
+
+  /**
+   * 失敗したフォントのリストを取得
+   */
+  static getFailedFonts(): string[] {
+    return Array.from(this.failedFonts);
   }
 }

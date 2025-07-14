@@ -1,0 +1,109 @@
+.common-button {
+  font-family: var(--font-primary);
+  font-size: var(--text-body);
+  border: none;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+  transition: var(--transition-normal);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  text-decoration: none;
+  outline: none;
+  position: relative;
+  user-select: none;
+}
+
+/* Size variants */
+.common-button--small {
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-small);
+}
+
+.common-button--medium {
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-body);
+}
+
+.common-button--large {
+  padding: var(--space-sm) var(--space-lg);
+  font-size: var(--text-subtitle);
+}
+
+/* Color variants */
+.common-button--primary {
+  background-color: var(--color-accent);
+  color: white;
+}
+
+.common-button--primary:hover:not(:disabled) {
+  background-color: var(--color-accent-hover);
+}
+
+.common-button--secondary {
+  background-color: var(--bg-level-5);
+  color: var(--text-primary);
+  border: 1px solid var(--border-standard);
+}
+
+.common-button--secondary:hover:not(:disabled) {
+  background-color: var(--bg-level-7);
+  border-color: var(--border-prominent);
+}
+
+.common-button--success {
+  background-color: var(--color-success);
+  color: white;
+}
+
+.common-button--success:hover:not(:disabled) {
+  background-color: var(--color-success-hover);
+}
+
+.common-button--danger {
+  background-color: var(--color-danger);
+  color: white;
+}
+
+.common-button--danger:hover:not(:disabled) {
+  background-color: var(--color-danger-hover);
+}
+
+.common-button--warning {
+  background-color: var(--color-warning);
+  color: white;
+}
+
+.common-button--warning:hover:not(:disabled) {
+  background-color: var(--color-warning-hover);
+}
+
+.common-button--info {
+  background-color: var(--color-info);
+  color: white;
+}
+
+.common-button--info:hover:not(:disabled) {
+  background-color: var(--color-info-hover);
+}
+
+/* States */
+.common-button:focus-visible {
+  box-shadow: 0 0 0 2px rgba(240, 5, 157, 0.3);
+}
+
+.common-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.common-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Full width */
+.common-button--full-width {
+  width: 100%;
+}

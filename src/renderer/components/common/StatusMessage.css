@@ -1,0 +1,67 @@
+.common-status-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-small);
+  margin: var(--space-sm) 0;
+  font-family: var(--font-primary);
+  font-size: var(--text-body);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.common-status-message--success {
+  background-color: rgba(76, 175, 80, 0.1);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
+}
+
+.common-status-message--error {
+  background-color: rgba(220, 53, 69, 0.1);
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+}
+
+.common-status-message--warning {
+  background-color: rgba(255, 152, 0, 0.1);
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
+}
+
+.common-status-message--info {
+  background-color: rgba(33, 150, 243, 0.1);
+  border: 1px solid var(--color-info);
+  color: var(--color-info);
+}
+
+.common-status-message-text {
+  flex: 1;
+}
+
+.common-status-message-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--transition-fast);
+  padding: 0;
+  margin-left: var(--space-sm);
+}
+
+.common-status-message-close:hover {
+  opacity: 1;
+}

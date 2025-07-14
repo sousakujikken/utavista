@@ -27,7 +27,7 @@ export default function Layout({
 }: LayoutProps) {
   return (
     <div className="layout">
-      <h2 className="heading">Visiblyrics v0.1.0 - カラオケ効果テスト</h2>
+      <h2 className="heading">UTAVISTA v0.1.0 - カラオケ効果テスト</h2>
       
       <p className="text-small">ファイルアップロード（未実装）</p>
       
