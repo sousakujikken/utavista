@@ -57,11 +57,13 @@
   justify-content: center;
   text-align: center;
   transition: font-family 0.2s ease;
-  background-color: var(--bg-level-3);
+  background-color: var(--bg-level-1);
   border: 1px solid var(--border-standard);
   border-radius: var(--radius-small);
   color: var(--text-primary);
   padding: var(--space-sm);
+  font-size: 16px;
+  font-weight: 500;
 }
 
 /* フォントファミリーセレクトのスタイル調整 */

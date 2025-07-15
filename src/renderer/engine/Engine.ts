@@ -260,48 +260,92 @@ export class Engine {
 
   // 歌詞データをロード (PhraseUnit[] を受け入れる)
   loadLyrics(data: PhraseUnit[]) {
-    
-    // まず各オブジェクトに固有のIDが付与されているか確認し、なければ設定する
-    const dataWithIds = this.ensureUniqueIds(data);
-    
-    // 文字インデックスを計算
-    this.phrases = calculateCharacterIndices(dataWithIds);
-    
-    // 歌詞データから最大時間を計算してaudioDurationを更新
-    this.calculateAndSetAudioDuration();
-    
-    this.charPositions.clear();
-
-    
-    // 既存の文字タイミングを保持するため、再計算は行わない
-
-    // V2: 各フレーズをParameterManagerV2に初期化
-    this.phrases.forEach(phrase => {
-      if (!this.parameterManager.isPhraseInitialized(phrase.id)) {
-        const templateId = this.templateManager.getTemplateForObject(phrase.id).constructor.name || 
-                          this.templateManager.getDefaultTemplateId();
-        this.parameterManager.initializePhrase(phrase.id, templateId);
-      }
+    console.log('Engine.loadLyrics: 歌詞データのロードを開始します', {
+      dataLength: data?.length,
+      firstPhrase: data?.[0]
     });
     
-    // ステージ上に歌詞配置を初期化
-    this.arrangeCharsOnStage();
-    
-    // インスタンスマネージャーにロード
-    this.instanceManager.loadPhrases(this.phrases, this.charPositions);
-    
-    // 初期表示（0ms時点）を設定
-    this.instanceManager.update(0);
-    
-    // タイムライン更新イベントを発火してUIコンポーネントに通知
-    this.dispatchTimelineUpdatedEvent();
-    
-    // フレーズコンテナの位置設定はテンプレート側に任せる
-    // 強制位置設定のコードを削除
-    
-    // 歌詞データロード後に自動保存
-    if (this.autoSaveEnabled) {
-      this.autoSaveToLocalStorage();
+    try {
+      // まず各オブジェクトに固有のIDが付与されているか確認し、なければ設定する
+      const dataWithIds = this.ensureUniqueIds(data);
+      console.log('Engine.loadLyrics: IDの確認・設定が完了しました');
+      
+      // 文字インデックスを計算
+      this.phrases = calculateCharacterIndices(dataWithIds);
+      console.log('Engine.loadLyrics: 文字インデックスの計算が完了しました', {
+        phraseCount: this.phrases.length
+      });
+      
+      // 歌詞データから最大時間を計算してaudioDurationを更新
+      this.calculateAndSetAudioDuration();
+      console.log('Engine.loadLyrics: オーディオ時間の計算が完了しました', {
+        audioDuration: this.audioDuration
+      });
+      
+      this.charPositions.clear();
+
+      
+      // 既存の文字タイミングを保持するため、再計算は行わない
+
+      // V2: 各フレーズをParameterManagerV2に初期化
+      this.phrases.forEach((phrase, index) => {
+        try {
+          if (!this.parameterManager.isPhraseInitialized(phrase.id)) {
+            const templateId = this.templateManager.getTemplateForObject(phrase.id).constructor.name || 
+                              this.templateManager.getDefaultTemplateId();
+            this.parameterManager.initializePhrase(phrase.id, templateId);
+          }
+        } catch (e) {
+          console.error(`Engine.loadLyrics: フレーズ ${index} の初期化中にエラーが発生しました:`, {
+            phraseId: phrase.id,
+            phrase: phrase,
+            error: e,
+            errorMessage: e instanceof Error ? e.message : String(e),
+            stack: e instanceof Error ? e.stack : undefined
+          });
+          throw e;
+        }
+      });
+      console.log('Engine.loadLyrics: ParameterManagerの初期化が完了しました');
+      
+      // ステージ上に歌詞配置を初期化
+      this.arrangeCharsOnStage();
+      console.log('Engine.loadLyrics: ステージ上の歌詞配置が完了しました');
+      
+      // インスタンスマネージャーにロード
+      this.instanceManager.loadPhrases(this.phrases, this.charPositions);
+      console.log('Engine.loadLyrics: インスタンスマネージャーへのロードが完了しました');
+      
+      // 初期表示（0ms時点）を設定
+      this.instanceManager.update(0);
+      console.log('Engine.loadLyrics: 初期表示の設定が完了しました');
+      
+      // タイムライン更新イベントを発火してUIコンポーネントに通知
+      this.dispatchTimelineUpdatedEvent();
+      console.log('Engine.loadLyrics: タイムライン更新イベントを発火しました');
+      
+      // フレーズコンテナの位置設定はテンプレート側に任せる
+      // 強制位置設定のコードを削除
+      
+      // 歌詞データロード後に自動保存
+      if (this.autoSaveEnabled) {
+        this.autoSaveToLocalStorage();
+        console.log('Engine.loadLyrics: ローカルストレージへの自動保存が完了しました');
+      }
+      
+      console.log('Engine.loadLyrics: 歌詞データのロードが正常に完了しました');
+    } catch (error) {
+      console.error('Engine.loadLyrics: 歌詞データのロード中にエラーが発生しました:', {
+        error: error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        dataInfo: {
+          dataLength: data?.length,
+          hasData: !!data,
+          isArray: Array.isArray(data)
+        }
+      });
+      throw error; // エラーを再スローして呼び出し元で処理できるようにする
     }
   }
 

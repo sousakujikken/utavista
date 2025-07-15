@@ -110,25 +110,53 @@ const LyricsPanel: React.FC<LyricsPanelProps> = ({ engine, onLyricsEditModeToggl
           
           // Engineが利用可能な場合、歌詞をロード
           if (engine) {
-            engine.loadLyrics(json);
-            setError(null); // エラーをクリア
-            setSuccessMessage(`歌詞データ "${file.name}" を正常に読み込みました。`);
-            
-            // 5秒後に成功メッセージを消去
-            setTimeout(() => {
-              setSuccessMessage(null);
-            }, 5000);
+            try {
+              engine.loadLyrics(json);
+              setError(null); // エラーをクリア
+              setSuccessMessage(`歌詞データ "${file.name}" を正常に読み込みました。`);
+              
+              // 5秒後に成功メッセージを消去
+              setTimeout(() => {
+                setSuccessMessage(null);
+              }, 5000);
+            } catch (engineError) {
+              const errorMessage = engineError instanceof Error ? engineError.message : String(engineError);
+              setError(`歌詞データのロード中にエラーが発生しました: ${errorMessage}`);
+              console.error('Engine.loadLyrics error:', engineError);
+              console.error('Engine.loadLyrics error details:', {
+                fileName: file.name,
+                errorMessage,
+                errorStack: engineError instanceof Error ? engineError.stack : undefined
+              });
+            }
           } else {
             setError('Engineが初期化されていません。');
             console.error('Engine not available for loading lyrics');
           }
         } catch (e) {
-          setError('JSONの解析中にエラーが発生しました。');
+          const errorMessage = e instanceof Error ? e.message : String(e);
+          setError(`JSONの解析中にエラーが発生しました: ${errorMessage}`);
           console.error('JSON parse error:', e);
+          console.error('Error details:', {
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type,
+            errorMessage,
+            errorStack: e instanceof Error ? e.stack : undefined,
+            fileContent: text.substring(0, 200) + '...' // 最初の200文字を表示
+          });
         }
       }).catch(err => {
-        setError('ファイルの読み込み中にエラーが発生しました。');
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        setError(`ファイルの読み込み中にエラーが発生しました: ${errorMessage}`);
         console.error('File read error:', err);
+        console.error('File read error details:', {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+          errorMessage,
+          errorStack: err instanceof Error ? err.stack : undefined
+        });
       });
     }
   };

@@ -148,12 +148,7 @@ const FontSelector: React.FC<FontSelectorProps> = ({ value, onChange, disabled =
           <div 
             className="font-preview-text"
             style={{ 
-              fontFamily: selectedStyle || selectedFamily,
-              fontSize: '16px',
-              padding: '8px',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-              backgroundColor: '#f9f9f9'
+              fontFamily: selectedStyle || selectedFamily
             }}
           >
             {selectedFamily} - {availableStyles.find(s => s.fullName === selectedStyle)?.displayName || 'Regular'}

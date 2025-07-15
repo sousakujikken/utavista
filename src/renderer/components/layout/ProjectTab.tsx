@@ -633,7 +633,7 @@ const ProjectTab: React.FC<ProjectTabProps> = ({ engine }) => {
       </Section>
 
       {/* メモリリークテストセクション（デバッグ用） */}
-      <Section title="メモリリークテスト（開発用）" className="test-section">
+      {/* <Section title="メモリリークテスト（開発用）" className="test-section">
         <div className="test-controls">
           <Button 
             variant="secondary"
@@ -655,7 +655,7 @@ const ProjectTab: React.FC<ProjectTabProps> = ({ engine }) => {
             <pre>{testLogs.join('\n')}</pre>
           </div>
         )}
-      </Section>
+      </Section> */}
     </div>
   );
 };

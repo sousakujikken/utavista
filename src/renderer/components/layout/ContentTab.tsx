@@ -37,8 +37,12 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
 
   // 歌詞データのバリデーション関数
   const validateLyricsData = (data: unknown): boolean => {
+    console.log('ContentTab: バリデーション開始', { data });
+    
     if (!Array.isArray(data)) {
-      setLyricsError('歌詞データは配列である必要があります。');
+      const errorMsg = '歌詞データは配列である必要があります。';
+      setLyricsError(errorMsg);
+      console.error('ContentTab: バリデーションエラー', { errorMsg, dataType: typeof data, data });
       return false;
     }
     
@@ -46,7 +50,9 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
       const phrase = data[i];
       
       if (!phrase.phrase || typeof phrase.phrase !== 'string') {
-        setLyricsError(`フレーズ ${i}: phraseフィールドが必要です。`);
+        const errorMsg = `フレーズ ${i}: phraseフィールドが必要です。`;
+        setLyricsError(errorMsg);
+        console.error('ContentTab: バリデーションエラー', { errorMsg, phrase });
         return false;
       }
       
@@ -99,6 +105,7 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
       }
     }
     
+    console.log('ContentTab: バリデーション成功');
     return true;
   };
 
@@ -116,27 +123,74 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
     setLyricsSuccessMessage(null);
 
     try {
+      console.log('ContentTab: ファイル読み込み開始', {
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type
+      });
+      
       const text = await file.text();
-      const data = JSON.parse(text);
+      console.log('ContentTab: ファイルテキスト読み込み完了', {
+        textLength: text.length,
+        firstChars: text.substring(0, 100)
+      });
+      
+      let data;
+      try {
+        data = JSON.parse(text);
+        console.log('ContentTab: JSONパース成功', {
+          dataType: typeof data,
+          isArray: Array.isArray(data),
+          dataLength: Array.isArray(data) ? data.length : undefined
+        });
+      } catch (parseError) {
+        console.error('ContentTab: JSONパースエラー', {
+          error: parseError,
+          errorMessage: parseError instanceof Error ? parseError.message : String(parseError),
+          text: text.substring(0, 200) + '...',
+          fileName: file.name
+        });
+        setLyricsError(`JSONパースエラー: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+        return;
+      }
 
       if (!validateLyricsData(data)) {
+        console.error('ContentTab: バリデーションエラー');
         return;
       }
 
       if (engine) {
-        engine.loadLyricsData(data);
-        setLyricsFileName(file.name);
-        setLyricsSuccessMessage('歌詞データを正常に読み込みました');
-        logger.debug('歌詞ファイルの読み込み完了', { fileName: file.name });
-        
-        setTimeout(() => {
-          setLyricsSuccessMessage(null);
-        }, 3000);
+        try {
+          engine.loadLyrics(data);
+          setLyricsFileName(file.name);
+          setLyricsSuccessMessage('歌詞データを正常に読み込みました');
+          console.log('ContentTab: 歌詞ファイルの読み込み完了', { fileName: file.name });
+          
+          setTimeout(() => {
+            setLyricsSuccessMessage(null);
+          }, 3000);
+        } catch (engineError) {
+          console.error('ContentTab: Engine.loadLyricsエラー', {
+            error: engineError,
+            errorMessage: engineError instanceof Error ? engineError.message : String(engineError),
+            errorStack: engineError instanceof Error ? engineError.stack : undefined
+          });
+          setLyricsError(`Engine読み込みエラー: ${engineError instanceof Error ? engineError.message : String(engineError)}`);
+        }
       } else {
         setLyricsError('エンジンが初期化されていません');
+        console.error('ContentTab: エンジンが初期化されていません');
       }
     } catch (error) {
-      logger.error('歌詞ファイルの読み込みエラー', error);
+      console.error('ContentTab: 歌詞ファイルの読み込みエラー', error);
+      console.error('ContentTab: 歌詞ファイルの読み込みエラー詳細:', {
+        error: error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        fileName: file?.name,
+        fileSize: file?.size,
+        fileType: file?.type
+      });
       setLyricsError('ファイルの読み込みに失敗しました。JSONファイルか確認してください。');
     }
   };

@@ -1,7 +1,7 @@
 {
   "name": "utavista",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.4.1",
   "main": "dist/main/main/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",

@@ -27,8 +27,11 @@ const FontPickerModal: React.FC<FontPickerModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       loadFonts();
+      // モーダルが開かれたときに、最新の選択状態を反映
+      setSelectedFonts(new Set(initialSelectedFonts));
+      setShowAllFonts(initialShowAllFonts);
     }
-  }, [isOpen]);
+  }, [isOpen, initialSelectedFonts, initialShowAllFonts]);
 
   const loadFonts = async () => {
     try {
