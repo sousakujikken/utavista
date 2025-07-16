@@ -258,15 +258,28 @@ npm run package:all      # 全プラットフォーム向けパッケージ化
 
 ## ライセンス
 
-このソフトウェアは GNU General Public License v3.0 (GPL-3.0) の下でライセンスされています。
+### デュアルライセンス構造
 
-詳細については、[LICENSE](./LICENSE) ファイルを参照してください。
+UTAVISTAは以下のデュアルライセンス構造を採用しています：
+
+- **メインアプリケーション**: GNU General Public License v3.0 (GPL-3.0)
+- **アニメーションテンプレート**: Creative Commons Attribution 4.0 International (CC-BY-4.0)
+
+詳細は以下のファイルを参照してください：
+- [LICENSE.txt](./LICENSE.txt) - GPL-3.0ライセンス全文
+- [LICENSE-CC-BY-4.0.txt](./LICENSE-CC-BY-4.0.txt) - CC-BY-4.0ライセンス概要
+- [LICENSE-TEMPLATES.md](./LICENSE-TEMPLATES.md) - テンプレートライセンスの詳細説明
 
 ### GPL-3.0 ライセンスについて
 
 - このソフトウェアを自由に使用、研究、共有、改変することができます
 - 改変版を配布する場合は、同じGPL-3.0ライセンスを適用する必要があります
 - 商用利用も可能ですが、ソースコードの開示が必要です
+
+### CC-BY-4.0 テンプレートについて
+
+一部のアニメーションテンプレート（MultiLineText、FlickerFadeTemplate、GlitchText、WordSlideText）は
+CC-BY-4.0でライセンスされており、適切なクレジット表記により自由に使用・改変できます。
 
 Copyright (C) 2025 UTAVISTA Project
 
@@ -285,7 +298,7 @@ the Free Software Foundation, either version 3 of the License, or
 - 基本的な動画エクスポート機能
 - プロジェクトファイルの保存・読み込み機能
 
-### v0.4.0 (現在のバージョン - プレベータ版)
+### v0.4.0 (プレベータ版)
 - 歌詞編集機能の大幅な拡充
 - 個別オブジェクトパラメータアクティベーション機能の実装
 - 出力範囲選択機能の追加（全区間・指定時間範囲）
@@ -293,6 +306,18 @@ the Free Software Foundation, either version 3 of the License, or
 - テンプレートシステムの安定化
 - 階層的なマーカー表示機能の充実
 - プロジェクト状態管理の改善
+
+### v0.4.1 (プレベータ版)
+- フォント選択機能の改善
+- エンジン安定性の向上
+- 歌詞パネルとコンテンツタブのUI/UX改善
+- パッケージ依存関係の更新
+
+### v0.4.2 (現在のバージョン - プレベータ版)
+- テンプレートパラメータ処理の改善
+- 自動スクロール機能の修正
+- UI表示の安定化
+- コードの最適化とバグ修正
 
 ## 貢献
 

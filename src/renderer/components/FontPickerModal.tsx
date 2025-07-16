@@ -130,10 +130,10 @@ const FontPickerModal: React.FC<FontPickerModalProps> = ({
               {filteredFonts.map(font => (
                 <div 
                   key={font.family} 
-                  className={`font-item ${selectedFonts.has(font.family) ? 'selected' : ''}`}
+                  className={`font-picker-item ${selectedFonts.has(font.family) ? 'selected' : ''}`}
                   onClick={() => handleFontToggle(font.family)}
                 >
-                  <div className="font-item-header">
+                  <div className="font-picker-item-header">
                     <input
                       type="checkbox"
                       checked={selectedFonts.has(font.family)}
@@ -148,7 +148,7 @@ const FontPickerModal: React.FC<FontPickerModalProps> = ({
                   </div>
                   
                   <div 
-                    className="font-preview"
+                    className="font-picker-preview"
                     style={{ fontFamily: font.family }}
                   >
                     <div className="preview-text-large">

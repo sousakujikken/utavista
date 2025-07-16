@@ -177,7 +177,7 @@
   padding: var(--space-sm);
 }
 
-.font-item {
+.font-picker-item {
   border: 2px solid var(--border-standard);
   border-radius: var(--radius-large);
   padding: var(--space-lg);
@@ -191,17 +191,19 @@
   width: 100%;
 }
 
-.font-item:hover {
+.font-picker-item:hover {
   border-color: var(--color-accent);
+  background-color: var(--bg-level-2);
   box-shadow: 0 4px 12px rgba(240, 5, 157, 0.15);
 }
 
-.font-item.selected {
+.font-picker-item.selected {
   border-color: var(--color-accent);
-  background-color: var(--bg-level-3);
+  background-color: rgba(240, 5, 157, 0.15);
+  box-shadow: 0 0 0 1px var(--color-accent) inset;
 }
 
-.font-item-header {
+.font-picker-item-header {
   display: flex;
   align-items: flex-start;
   gap: var(--space-sm);
@@ -248,8 +250,8 @@
   white-space: nowrap;
 }
 
-.font-preview {
-  background-color: var(--bg-level-3);
+.font-picker-preview {
+  background-color: var(--bg-level-0);
   border-radius: var(--radius-large);
   padding: var(--space-lg);
   text-align: center;

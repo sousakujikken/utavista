@@ -227,6 +227,46 @@ const WordSplitEditor: React.FC<WordSplitEditorProps> = ({ phrase, onSave, onClo
     setWords(words.filter(w => w.id !== wordId));
   };
 
+  // 自動時間割り当て機能
+  const handleAutoAssignTime = () => {
+    // 全体の文字数を計算
+    const totalChars = words.reduce((sum, word) => sum + word.word.length, 0);
+    if (totalChars === 0) return;
+
+    // フレーズの総時間
+    const totalDuration = phrase.end - phrase.start;
+    
+    // 各単語に時間を割り当て
+    let currentTime = phrase.start;
+    const updatedWords = words.map((word, index) => {
+      const wordCharCount = word.word.length;
+      const wordDuration = (wordCharCount / totalChars) * totalDuration;
+      
+      const newStart = currentTime;
+      const newEnd = index === words.length - 1 
+        ? phrase.end  // 最後の単語は正確にフレーズの終了時刻に
+        : currentTime + wordDuration;
+      
+      currentTime = newEnd;
+      
+      // 単語内の文字の時間も再計算
+      const chars = word.chars.map((char, charIndex) => ({
+        ...char,
+        start: Math.round(newStart + (charIndex / wordCharCount) * (newEnd - newStart)),
+        end: Math.round(newStart + ((charIndex + 1) / wordCharCount) * (newEnd - newStart))
+      }));
+      
+      return {
+        ...word,
+        start: Math.round(newStart),
+        end: Math.round(newEnd),
+        chars
+      };
+    });
+    
+    setWords(updatedWords);
+  };
+
   // 保存処理
   const handleSave = () => {
     // charIndexはredistributeCharactersToWordsで正しく設定済み
@@ -272,8 +312,11 @@ const WordSplitEditor: React.FC<WordSplitEditorProps> = ({ phrase, onSave, onClo
       <div className="word-split-editor-header">
         <h3>単語分割編集: "{phrase.phrase}"</h3>
         <div className="word-split-editor-controls">
-          <Button variant="info" onClick={handleAutoSplit}>
+          <Button variant="info" onClick={handleAutoSplit} disabled={true}>
             自動分割
+          </Button>
+          <Button variant="info" onClick={handleAutoAssignTime}>
+            自動時間割り当て
           </Button>
           <Button variant="primary" onClick={handleSave}>
             OK
