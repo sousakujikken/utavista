@@ -1,6 +1,6 @@
 # UTAVISTA Documentation
 
-UTAVISTA v0.1.0 の設計ドキュメント集です。
+UTAVISTA v0.4.2 の設計ドキュメント集です。
 
 ## ドキュメント構成
 

@@ -1,6 +1,6 @@
-# テンプレート実装ガイド - UTAVISTA v0.4.1
+# テンプレート実装ガイド - UTAVISTA v0.4.2
 
-このドキュメントは、**UTAVISTA v0.4.1**で新しいアニメーションテンプレートを実装するための詳細な手順を説明します。実装済みのMultiLineText、FlickerFadeTemplate、GlitchText、WordSlideTextテンプレートの実際の実装パターンを基に、高品質なテンプレートを作成できるよう指導します。
+このドキュメントは、**UTAVISTA v0.4.2**で新しいアニメーションテンプレートを実装するための詳細な手順を説明します。実装済みのMultiLineText、FlickerFadeTemplate、GlitchText、WordSlideTextテンプレートの実際の実装パターンを基に、高品質なテンプレートを作成できるよう指導します。
 
 ## 目次
 
@@ -1135,7 +1135,7 @@ export class MyCustomTemplate implements IAnimationTemplate {
 
 ## まとめ
 
-このガイドでは、UTAVISTA v0.4.1における包括的なテンプレート実装手順を説明しました。
+このガイドでは、UTAVISTA v0.4.2における包括的なテンプレート実装手順を説明しました。
 
 ### 重要なポイント
 
