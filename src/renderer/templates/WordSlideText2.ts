@@ -5,10 +5,10 @@ import { IAnimationTemplate, HierarchyType, AnimationPhase, TemplateMetadata } f
 import { FontService } from '../services/FontService';
 import { TextStyleFactory } from '../utils/TextStyleFactory';
 
-// フレームカウンターとデバッグ用のグローバル変数
-let frameCounter = 0;
-let lastLogFrame = 0;
-let templateApplicationCount = 0;
+// フレームカウンターとデバッグ用のグローバル変数（無効化）
+// let frameCounter = 0;
+// let lastLogFrame = 0;
+// let templateApplicationCount = 0;
 
 /**
  * イージング関数（ユーティリティ）
@@ -188,6 +188,41 @@ function generateCharacterOffset(charId: string, seed: number, rangeX: number, r
 }
 
 /**
+ * コピー固有のランダム位置を生成
+ * @param charId 文字の一意ID
+ * @param copyIndex コピーのインデックス
+ * @param seed シード値
+ * @param range 出現位置の範囲
+ * @returns ランダム位置オフセット
+ */
+function generateCopyPosition(charId: string, copyIndex: number, seed: number, range: number): { x: number; y: number } {
+  // 文字IDとコピーインデックス、シードから一意のハッシュを生成
+  let hash = seed;
+  const combinedId = `${charId}_copy_${copyIndex}`;
+  for (let i = 0; i < combinedId.length; i++) {
+    const char = combinedId.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  
+  // ハッシュから擬似ランダム生成器を初期化
+  let rng = Math.abs(hash) + 1; // 0を避けるため+1
+  const nextRandom = () => {
+    rng = ((rng * 1103515245) + 12345) & 0x7fffffff;
+    return rng / 0x7fffffff;
+  };
+  
+  // 円形範囲内のランダムな位置を生成
+  const angle = nextRandom() * 2 * Math.PI; // 0から2πまでの角度
+  const distance = nextRandom() * range; // 0から指定範囲までの距離
+  
+  const x = Math.cos(angle) * distance;
+  const y = Math.sin(angle) * distance;
+  
+  return { x, y };
+}
+
+/**
  * WordSlideText2 テンプレート
  * 単語が段階的にスライドインする歌詞表示テンプレート
  */
@@ -205,38 +240,39 @@ export const WordSlideText2: IAnimationTemplate = {
   // デバッグ用: テンプレート名
   _debugTemplateName: 'WordSlideText2',
   
-  // フレーム管理とデバッグ用メソッド
+  // フレーム管理とデバッグ用メソッド（無効化）
   _logFrameInfo(hierarchyType: HierarchyType, text: string, params: Record<string, unknown>, nowMs: number, startMs: number, endMs: number, phase: AnimationPhase) {
-    frameCounter++;
-    
-    // 10フレームごとに詳細ログを出力
-    if (frameCounter - lastLogFrame >= 10) {
-      lastLogFrame = frameCounter;
-      
-      console.log(`\n=== [WordSlideText2] フレーム ${frameCounter} ===`);
-      console.log(`テンプレート適用回数: ${templateApplicationCount}`);
-      console.log(`階層タイプ: ${hierarchyType}`);
-      console.log(`文字: "${text}"`);
-      console.log(`現在時刻: ${nowMs}ms, 開始: ${startMs}ms, 終了: ${endMs}ms`);
-      console.log(`フェーズ: ${phase}`);
-      
-      // パラメータの主要設定を出力
-      console.log(`設定フォントサイズ: ${params.fontSize}px`);
-      console.log(`文字拡大機能: ${params.enableCharScaling ? 'ON' : 'OFF'}`);
-      if (params.enableCharScaling) {
-        console.log(`  拡大倍率: ${params.charScaleMultiplier}倍`);
-        console.log(`  X座標オフセット範囲: ±${params.charPositionOffsetX}px`);
-        console.log(`  Y座標オフセット範囲: ±${params.charPositionOffsetY}px`);
-        console.log(`  ランダムシード: ${params.charScalingSeed}`);
-      }
-    }
+    // デバッグログ出力を無効化
+    // frameCounter++;
+    // 
+    // // 10フレームごとに詳細ログを出力
+    // if (frameCounter - lastLogFrame >= 10) {
+    //   lastLogFrame = frameCounter;
+    //   
+    //   console.log(`\n=== [WordSlideText2] フレーム ${frameCounter} ===`);
+    //   console.log(`テンプレート適用回数: ${templateApplicationCount}`);
+    //   console.log(`階層タイプ: ${hierarchyType}`);
+    //   console.log(`文字: "${text}"`);
+    //   console.log(`現在時刻: ${nowMs}ms, 開始: ${startMs}ms, 終了: ${endMs}ms`);
+    //   console.log(`フェーズ: ${phase}`);
+    //   
+    //   // パラメータの主要設定を出力
+    //   console.log(`設定フォントサイズ: ${params.fontSize}px`);
+    //   console.log(`文字拡大機能: ${params.enableCharScaling ? 'ON' : 'OFF'}`);
+    //   if (params.enableCharScaling) {
+    //     console.log(`  拡大倍率: ${params.charScaleMultiplier}倍`);
+    //     console.log(`  X座標オフセット範囲: ±${params.charPositionOffsetX}px`);
+    //     console.log(`  Y座標オフセット範囲: ±${params.charPositionOffsetY}px`);
+    //     console.log(`  ランダムシード: ${params.charScalingSeed}`);
+    //   }
+    // }
   },
 
   // テンプレートメタデータ
   metadata: {
     name: "WordSlideText2",
-    version: "1.1.0",
-    description: "単語が段階的にスライドインする歌詞表示テンプレート。発声中の文字拡大とランダム位置オフセット機能付き。",
+    version: "1.2.0",
+    description: "単語が段階的にスライドインする歌詞表示テンプレート。発声中の文字拡大とランダム位置オフセット、複数コピーによる退場アニメーション機能付き。",
     license: "CC-BY-4.0",
     licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
     originalAuthor: {
@@ -315,7 +351,19 @@ export const WordSlideText2: IAnimationTemplate = {
       { name: "charScaleMultiplier", type: "number", default: 8.0, min: 1.0, max: 20.0, step: 0.5, description: "拡大倍率" },
       { name: "charPositionOffsetX", type: "number", default: 20, min: 0, max: 100, step: 5, description: "X座標ランダム範囲(px)" },
       { name: "charPositionOffsetY", type: "number", default: 100, min: 0, max: 200, step: 10, description: "Y座標ランダム範囲(px)" },
-      { name: "charScalingSeed", type: "number", default: 12345, min: 0, max: 99999, step: 1, description: "ランダムシード値" }
+      { name: "charScalingSeed", type: "number", default: 12345, min: 0, max: 99999, step: 1, description: "ランダムシード値" },
+      
+      // 退場アニメーション設定
+      { name: "enableExitAnimation", type: "boolean", default: true, description: "退場アニメーション有効" },
+      { name: "exitCopyCount", type: "number", default: 3, min: 1, max: 10, step: 1, description: "コピー数" },
+      { name: "exitFrameDelay", type: "number", default: 3, min: 1, max: 10, step: 1, description: "フレーム遅延" },
+      { name: "exitCopyScale", type: "number", default: 2.0, min: 0.5, max: 5.0, step: 0.1, description: "コピー拡大倍率" },
+      { name: "exitCopyColor", type: "color", default: "#FFFFFF", description: "コピー文字色" },
+      { name: "exitAnimationDuration", type: "number", default: 10, min: 5, max: 30, step: 1, description: "アニメーション期間(フレーム)" },
+      
+      // コピー出現位置設定
+      { name: "copyPositionRandomRange", type: "number", default: 50, min: 0, max: 200, step: 10, description: "コピー出現位置範囲(px)" },
+      { name: "copyPositionSeed", type: "number", default: 54321, min: 0, max: 99999, step: 1, description: "コピー位置ランダムシード" }
     ];
   },
   
@@ -328,11 +376,11 @@ export const WordSlideText2: IAnimationTemplate = {
     const childrenToKeep: PIXI.DisplayObject[] = [];
     const childrenToRemove: PIXI.DisplayObject[] = [];
     
-    // デバッグログ：削除処理の詳細
-    if (frameCounter % 10 === 0) {
-      console.log(`[WordSlideText2] removeVisualElements called on container: ${(container as any).name || 'unknown'}`);
-      console.log(`  子要素数: ${container.children.length}`);
-    }
+    // デバッグログ：削除処理の詳細（無効化）
+    // if (frameCounter % 10 === 0) {
+    //   console.log(`[WordSlideText2] removeVisualElements called on container: ${(container as any).name || 'unknown'}`);
+    //   console.log(`  子要素数: ${container.children.length}`);
+    // }
     
     container.children.forEach(child => {
       if (child instanceof PIXI.Container && 
@@ -344,6 +392,10 @@ export const WordSlideText2: IAnimationTemplate = {
         childrenToKeep.push(child);
       } else if (child instanceof PIXI.Text && (child as any).name === 'text') {
         // 文字コンテナ内のテキストオブジェクトは保護
+        childrenToKeep.push(child);
+      } else if (child instanceof PIXI.Text && (child as any).name && 
+                 ((child as any).name.startsWith('start_copy_') || (child as any).name === 'original_text')) {
+        // 開始時アニメーション中のコピーと元の文字は保護
         childrenToKeep.push(child);
       } else {
         // その他の視覚要素は削除
@@ -374,11 +426,11 @@ export const WordSlideText2: IAnimationTemplate = {
     hierarchyType: HierarchyType,
     phase: AnimationPhase
   ): boolean {
-    templateApplicationCount++;
+    // templateApplicationCount++;
     const textContent = Array.isArray(text) ? text.join('') : text;
     
-    // フレーム情報とデバッグログを出力
-    this._logFrameInfo!(hierarchyType, textContent, params, nowMs, startMs, endMs, phase);
+    // フレーム情報とデバッグログを出力（無効化）
+    // this._logFrameInfo!(hierarchyType, textContent, params, nowMs, startMs, endMs, phase);
     
     container.visible = true;
     
@@ -417,16 +469,16 @@ export const WordSlideText2: IAnimationTemplate = {
     phase: AnimationPhase,
     _hierarchyType: HierarchyType
   ): boolean {
-    // フレーズレベルのデバッグログ
-    if (frameCounter % 10 === 0) {
-      console.log(`\n=== [WordSlideText2] フレーズコンテナ処理 ===`);
-      console.log(`フレーズテキスト: "${text}"`);
-      console.log(`コンテナ名: ${(container as any).name || 'unknown'}`);
-      console.log(`フェーズ: ${phase}, 時刻: ${nowMs}ms`);
-      console.log(`子コンテナ数: ${container.children.length}`);
-      console.log(`アルファ値: ${container.alpha}`);
-      console.log(`位置: (${container.position.x}, ${container.position.y})`);
-    }
+    // フレーズレベルのデバッグログ（無効化）
+    // if (frameCounter % 10 === 0) {
+    //   console.log(`\n=== [WordSlideText2] フレーズコンテナ処理 ===`);
+    //   console.log(`フレーズテキスト: "${text}"`);
+    //   console.log(`コンテナ名: ${(container as any).name || 'unknown'}`);
+    //   console.log(`フェーズ: ${phase}, 時刻: ${nowMs}ms`);
+    //   console.log(`子コンテナ数: ${container.children.length}`);
+    //   console.log(`アルファ値: ${container.alpha}`);
+    //   console.log(`位置: (${container.position.x}, ${container.position.y})`);
+    // }
     // グロー効果の設定
     const enableGlow = params.enableGlow as boolean ?? true;
     const glowStrength = params.glowStrength as number || 1.5;
@@ -744,7 +796,7 @@ export const WordSlideText2: IAnimationTemplate = {
   
   /**
    * 文字コンテナの描画
-   * 3段階の色変化と拡大・ランダム位置オフセットを実装
+   * 3段階の色変化と拡大・ランダム位置オフセット、サイズ復元、退場アニメーションを実装
    */
   renderCharContainer(
     container: PIXI.Container,
@@ -756,23 +808,23 @@ export const WordSlideText2: IAnimationTemplate = {
     phase: AnimationPhase,
     _hierarchyType: HierarchyType
   ): boolean {
-    // 詳細ログ：文字レベルでの処理状況を常に記録
-    const containerId = (container as any).name || 'unknown';
-    const charId = params.id as string || `char_${startMs}_${text}`;
-    
-    // キャラクターレンダリング詳細ログ
-    if (frameCounter % 10 === 0) { // 10フレームごとに出力
-      console.log(`\n--- [WordSlideText2] 文字レンダリング詳細 ---`);
-      console.log(`文字: "${text}", ID: ${charId}, Container: ${containerId}`);
-      console.log(`フェーズ: ${phase}, 時刻: ${nowMs}ms (${startMs}ms-${endMs}ms)`);
-      console.log(`スケーリング設定:`, {
-        enableCharScaling: params.enableCharScaling,
-        charScaleMultiplier: params.charScaleMultiplier,
-        charPositionOffsetX: params.charPositionOffsetX,
-        charPositionOffsetY: params.charPositionOffsetY,
-        charScalingSeed: params.charScalingSeed
-      });
-    }
+    // 詳細ログ：文字レベルでの処理状況を常に記録（無効化）
+    // const containerId = (container as any).name || 'unknown';
+    // const charId = params.id as string || `char_${startMs}_${text}`;
+    // 
+    // // キャラクターレンダリング詳細ログ
+    // if (frameCounter % 10 === 0) { // 10フレームごとに出力
+    //   console.log(`\n--- [WordSlideText2] 文字レンダリング詳細 ---`);
+    //   console.log(`文字: "${text}", ID: ${charId}, Container: ${containerId}`);
+    //   console.log(`フェーズ: ${phase}, 時刻: ${nowMs}ms (${startMs}ms-${endMs}ms)`);
+    //   console.log(`スケーリング設定:`, {
+    //     enableCharScaling: params.enableCharScaling,
+    //     charScaleMultiplier: params.charScaleMultiplier,
+    //     charPositionOffsetX: params.charPositionOffsetX,
+    //     charPositionOffsetY: params.charPositionOffsetY,
+    //     charScalingSeed: params.charScalingSeed
+    //   });
+    // }
     
     const fontSize = params.fontSize as number || 120;
     const fontFamily = params.fontFamily as string;
@@ -793,58 +845,121 @@ export const WordSlideText2: IAnimationTemplate = {
     
     container.visible = true;
     
+    // 時間計算
+    const headTime = params.headTime as number || 500;
+    const inStartTime = startMs - headTime;
+    const tailTime = params.tailTime as number || 500;
+    const outEndTime = endMs + tailTime;
+    
     // 文字の状態を判定
     let textColor = defaultTextColor;
     let scale = 1.0;
     let positionOffset = { x: 0, y: 0 };
+    let alpha = 1.0;
     
-    if (nowMs < startMs) {
-      // 文字のイン前
+    if (nowMs < inStartTime) {
+      // headtime前：非表示
       textColor = defaultTextColor;
       scale = 1.0;
-    } else if (nowMs <= endMs) {
-      // 文字のアクティブ期間
-      textColor = activeTextColor;
+      alpha = 0;
+    } else if (nowMs < startMs) {
+      // headtime期間：3次イージングで拡大
+      textColor = defaultTextColor;
       
-      // スケーリングが有効な場合、拡大とランダム位置オフセットを適用
       if (enableCharScaling) {
-        scale = charScaleMultiplier;
+        const elapsedInHead = nowMs - inStartTime;
+        const progress = Math.min(elapsedInHead / headTime, 1.0);
         
-        // 文字IDを取得（paramsから、またはテキストから生成）
+        // 3次イージング（キュービックイン）：ゆっくり開始、徐々に加速
+        const easedProgress = easeInCubic(progress);
+        
+        // 1.0から拡大サイズまで
+        scale = 1.0 + (charScaleMultiplier - 1.0) * easedProgress;
+        
+        // 文字IDを取得
         const charId = params.id as string || `char_${startMs}_${text}`;
         
         // この文字固有のランダムオフセットを生成
-        positionOffset = generateCharacterOffset(
+        const targetOffset = generateCharacterOffset(
           charId, 
           charScalingSeed, 
-          charPositionOffsetX * 2, // ±rangeになるように2倍
-          charPositionOffsetY * 2  // ±rangeになるように2倍
+          charPositionOffsetX * 2,
+          charPositionOffsetY * 2
         );
         
-        // デバッグログ：スケーリング適用状況
-        if (frameCounter % 10 === 0) { // 10フレームごとに詳細ログ
-          console.log(`[WordSlideText2 SCALING] char="${text}" ACTIVE`);
-          console.log(`[WordSlideText2 SCALING] charId="${charId}"`);
-          console.log(`[WordSlideText2 SCALING] calculated scale=${scale}, offset=(${positionOffset.x.toFixed(2)}, ${positionOffset.y.toFixed(2)})`);
-        }
+        // 位置オフセットも徐々に適用
+        positionOffset = {
+          x: targetOffset.x * easedProgress,
+          y: targetOffset.y * easedProgress
+        };
+        
+        alpha = Math.min(progress * 2, 1.0); // 拡大と同時にフェードイン
+        
+        // デバッグログ（無効化）
+        // if (frameCounter % 10 === 0) {
+        //   console.log(`[WordSlideText2 EXPANDING] char="${text}" progress=${progress.toFixed(3)}, scale=${scale.toFixed(3)}`);
+        // }
+      } else {
+        alpha = Math.min((nowMs - inStartTime) / headTime, 1.0);
+      }
+    } else if (nowMs <= endMs) {
+      // アクティブ期間：5%縮小アニメーション + 3次イージングフェードアウト
+      textColor = activeTextColor;
+      
+      if (enableCharScaling) {
+        const activeDuration = endMs - startMs;
+        const elapsed = nowMs - startMs;
+        const progress = Math.min(elapsed / activeDuration, 1.0);
+        
+        // 拡大サイズから5%縮小
+        const shrinkAmount = charScaleMultiplier * 0.05;
+        scale = charScaleMultiplier - shrinkAmount * progress;
+        
+        // 文字IDを取得
+        const charId = params.id as string || `char_${startMs}_${text}`;
+        
+        // この文字固有のランダムオフセットを維持
+        const targetOffset = generateCharacterOffset(
+          charId, 
+          charScalingSeed, 
+          charPositionOffsetX * 2,
+          charPositionOffsetY * 2
+        );
+        
+        positionOffset = {
+          x: targetOffset.x,
+          y: targetOffset.y
+        };
+        
+        // 3次イージングでフェードアウト（最初はゆっくり、徐々に加速）
+        const fadeProgress = easeInCubic(progress);
+        alpha = 1.0 - fadeProgress;
+        
+        // デバッグログ（無効化）
+        // if (frameCounter % 10 === 0) {
+        //   console.log(`[WordSlideText2 ACTIVE] char="${text}" progress=${progress.toFixed(3)}, scale=${scale.toFixed(3)}, alpha=${alpha.toFixed(3)}`);
+        // }
+      } else {
+        alpha = 1.0;
       }
     } else {
-      // 文字のアウト後
+      // アウト期間：非表示
       textColor = completedTextColor;
       scale = 1.0;
+      alpha = 0;
     }
     
     // 既存のテキストオブジェクトを取得または新規作成
     let textObj = container.getChildByName('text') as PIXI.Text;
     if (!textObj) {
-      // デバッグ：devicePixelRatioの確認
-      const devicePixelRatio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
-      if (frameCounter % 10 === 0) {
-        console.log(`[WordSlideText2] devicePixelRatio: ${devicePixelRatio}`);
-        console.log(`[WordSlideText2] 設定フォントサイズ: ${fontSize}px`);
-        console.log(`[WordSlideText2] 高DPI処理後の予想フォントサイズ: ${fontSize * devicePixelRatio}px`);
-        console.log(`[WordSlideText2] 高DPI処理後の予想スケール: ${1 / devicePixelRatio}`);
-      }
+      // デバッグ：devicePixelRatioの確認（無効化）
+      // const devicePixelRatio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+      // if (frameCounter % 10 === 0) {
+      //   console.log(`[WordSlideText2] devicePixelRatio: ${devicePixelRatio}`);
+      //   console.log(`[WordSlideText2] 設定フォントサイズ: ${fontSize}px`);
+      //   console.log(`[WordSlideText2] 高DPI処理後の予想フォントサイズ: ${fontSize * devicePixelRatio}px`);
+      //   console.log(`[WordSlideText2] 高DPI処理後の予想スケール: ${1 / devicePixelRatio}`);
+      // }
       
       // 新規作成（高DPI処理を無効化して正確なサイズ制御）
       textObj = TextStyleFactory.createText(text, {
@@ -865,34 +980,170 @@ export const WordSlideText2: IAnimationTemplate = {
       textObj.text = text;
     }
     
-    // スケールとポジションオフセットを適用
+    // スケール、ポジションオフセット、アルファを適用
     textObj.scale.set(scale, scale);
     textObj.position.set(positionOffset.x, positionOffset.y);
+    textObj.alpha = alpha;
     
-    // デバッグログ：PIXI.Text適用確認（10フレームごとに詳細出力）
-    if (frameCounter % 10 === 0) {
-      const devicePixelRatio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
-      const actualTextStyle = textObj.style;
+    // 開始時刻でのコピー拡大フェードアウトアニメーション
+    const enableExitAnimation = params.enableExitAnimation as boolean ?? true;
+    const exitCopyCount = params.exitCopyCount as number || 3;
+    const exitFrameDelay = params.exitFrameDelay as number || 3;
+    const exitCopyScale = params.exitCopyScale as number || 2.0;
+    const exitCopyColor = params.exitCopyColor as string || '#FFFFFF';
+    const exitAnimationDuration = params.exitAnimationDuration as number || 10;
+    const copyPositionRandomRange = params.copyPositionRandomRange as number || 50;
+    const copyPositionSeed = params.copyPositionSeed as number || 54321;
+    
+    if (nowMs >= startMs && enableCharScaling && enableExitAnimation) {
+      const exitAnimationDurationMs = exitAnimationDuration * (1000 / 60);
+      const elapsedSinceStart = nowMs - startMs;
+      const maxTotalDuration = (exitCopyCount - 1) * exitFrameDelay * (1000 / 60) + exitAnimationDurationMs;
       
-      console.log(`[WordSlideText2 PIXI] char="${text}" 最終適用状況:`);
-      console.log(`  設定フォントサイズ: ${fontSize}px`);
-      console.log(`  devicePixelRatio: ${devicePixelRatio}`);
-      console.log(`  PIXI.TextStyleのfontSize: ${actualTextStyle.fontSize}px`);
-      console.log(`  実際のテキスト: "${textObj.text}"`);
-      console.log(`  計算されたスケール: ${scale} → 実際のスケール: (${textObj.scale.x}, ${textObj.scale.y})`);
-      console.log(`  最終的な表示サイズ: ${actualTextStyle.fontSize * textObj.scale.x}px`);
-      console.log(`  計算されたオフセット: (${positionOffset.x.toFixed(2)}, ${positionOffset.y.toFixed(2)}) → 実際の位置: (${textObj.position.x.toFixed(2)}, ${textObj.position.y.toFixed(2)})`);
-      console.log(`  色: ${textColor}`);
-      console.log(`  コンテナ可視性: ${container.visible}`);
-      console.log(`  テキストオブジェクト情報: 幅=${textObj.width.toFixed(2)}, 高さ=${textObj.height.toFixed(2)}`);
-      console.log(`  実際の表示幅: ${(textObj.width * textObj.scale.x).toFixed(2)}px`);
-      
-      if (scale !== 1.0 || positionOffset.x !== 0 || positionOffset.y !== 0) {
-        console.log(`  ⚠️ スケーリング/オフセット効果が適用されました！`);
+      // 開始時刻から一定時間のみ処理
+      if (elapsedSinceStart <= maxTotalDuration) {
+        // 各コピーを処理
+        for (let copyIndex = 0; copyIndex < exitCopyCount; copyIndex++) {
+          const copyDelayMs = copyIndex * exitFrameDelay * (1000 / 60);
+          const copyStartTime = elapsedSinceStart - copyDelayMs;
+          const copyName = `start_copy_${copyIndex}`;
+          
+          if (copyStartTime > 0 && copyStartTime <= exitAnimationDurationMs) {
+            // このコピーのアニメーション期間中
+            const copyProgress = copyStartTime / exitAnimationDurationMs;
+            
+            // 文字コピーを取得または作成
+            let startCopyObj = container.getChildByName(copyName) as PIXI.Text;
+            if (!startCopyObj) {
+              startCopyObj = TextStyleFactory.createText(text, {
+                fontFamily: fontFamily,
+                fontSize: fontSize,
+                fill: exitCopyColor
+              });
+              startCopyObj.name = copyName;
+              startCopyObj.anchor.set(0.5, 0.5);
+              container.addChild(startCopyObj);
+              
+              // デバッグログ：コピー作成（無効化）
+              // if (frameCounter % 5 === 0) {
+              //   console.log(`[WordSlideText2 START_COPY] char="${text}" copy=${copyIndex} CREATED`);
+              // }
+            }
+            
+            // 文字コピーのアニメーション（拡大・フェードアウト）
+            const startScale = charScaleMultiplier + (exitCopyScale - charScaleMultiplier) * copyProgress;
+            startCopyObj.scale.set(startScale, startScale);
+            startCopyObj.alpha = 1.0 - copyProgress;
+            
+            // 文字IDを取得
+            const charId = params.id as string || `char_${startMs}_${text}`;
+            
+            // オリジナル文字の位置を取得
+            const originalOffset = generateCharacterOffset(
+              charId, 
+              charScalingSeed, 
+              charPositionOffsetX * 2,
+              charPositionOffsetY * 2
+            );
+            
+            // このコピー固有のランダム位置を生成
+            const copyRandomOffset = generateCopyPosition(
+              charId,
+              copyIndex,
+              copyPositionSeed,
+              copyPositionRandomRange
+            );
+            
+            // オリジナル位置 + ランダムオフセット
+            const finalPosition = {
+              x: originalOffset.x + copyRandomOffset.x,
+              y: originalOffset.y + copyRandomOffset.y
+            };
+            
+            startCopyObj.position.set(finalPosition.x, finalPosition.y);
+            
+            // デバッグログ：開始時コピーアニメーション状況（無効化）
+            // if (frameCounter % 5 === 0) {
+            //   console.log(`[WordSlideText2 START_COPY] char="${text}" copy=${copyIndex}, progress=${copyProgress.toFixed(3)}, scale=${startScale.toFixed(3)}, alpha=${startCopyObj.alpha.toFixed(3)}`);
+            //   console.log(`[WordSlideText2 START_COPY] position: original(${originalOffset.x.toFixed(1)}, ${originalOffset.y.toFixed(1)}) + random(${copyRandomOffset.x.toFixed(1)}, ${copyRandomOffset.y.toFixed(1)}) = final(${finalPosition.x.toFixed(1)}, ${finalPosition.y.toFixed(1)})`);
+            // }
+          } else if (copyStartTime > exitAnimationDurationMs) {
+            // このコピーのアニメーション完了後、コピーを削除
+            const startCopyObj = container.getChildByName(copyName) as PIXI.Text;
+            if (startCopyObj) {
+              container.removeChild(startCopyObj);
+              startCopyObj.destroy();
+              
+              // デバッグログ：コピー削除（無効化）
+              // if (frameCounter % 5 === 0) {
+              //   console.log(`[WordSlideText2 START_COPY] char="${text}" copy=${copyIndex} DESTROYED`);
+              // }
+            }
+          }
+        }
       } else {
-        console.log(`  ⚠️ スケーリング/オフセット効果が適用されていません`);
+        // 全てのアニメーションが完了した場合、残っているコピーを全て削除
+        for (let copyIndex = 0; copyIndex < exitCopyCount; copyIndex++) {
+          const copyName = `start_copy_${copyIndex}`;
+          const startCopyObj = container.getChildByName(copyName) as PIXI.Text;
+          if (startCopyObj) {
+            container.removeChild(startCopyObj);
+            startCopyObj.destroy();
+          }
+        }
       }
     }
+    
+    // 終了時刻以降：元の位置に文字をフェードイン
+    if (nowMs > endMs) {
+      // 元の位置に文字をフェードイン
+      let originalTextObj = container.getChildByName('original_text') as PIXI.Text;
+      if (!originalTextObj) {
+        originalTextObj = TextStyleFactory.createText(text, {
+          fontFamily: fontFamily,
+          fontSize: fontSize,
+          fill: completedTextColor
+        });
+        originalTextObj.name = 'original_text';
+        originalTextObj.anchor.set(0.5, 0.5);
+        originalTextObj.position.set(0, 0); // 元の位置
+        originalTextObj.scale.set(1.0, 1.0); // 元のサイズ
+        container.addChild(originalTextObj);
+      }
+      
+      // フェードインは瞬時に完了
+      originalTextObj.alpha = 1.0;
+      
+      // デバッグログ（無効化）
+      // if (frameCounter % 10 === 0) {
+      //   console.log(`[WordSlideText2 ORIGINAL_FADEIN] char="${text}" alpha=${originalTextObj.alpha.toFixed(3)}`);
+      // }
+    }
+    
+    // デバッグログ：PIXI.Text適用確認（無効化）
+    // if (frameCounter % 10 === 0) {
+    //   const devicePixelRatio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    //   const actualTextStyle = textObj.style;
+    //   
+    //   console.log(`[WordSlideText2 PIXI] char="${text}" 最終適用状況:`);
+    //   console.log(`  設定フォントサイズ: ${fontSize}px`);
+    //   console.log(`  devicePixelRatio: ${devicePixelRatio}`);
+    //   console.log(`  PIXI.TextStyleのfontSize: ${actualTextStyle.fontSize}px`);
+    //   console.log(`  実際のテキスト: "${textObj.text}"`);
+    //   console.log(`  計算されたスケール: ${scale} → 実際のスケール: (${textObj.scale.x}, ${textObj.scale.y})`);
+    //   console.log(`  最終的な表示サイズ: ${actualTextStyle.fontSize * textObj.scale.x}px`);
+    //   console.log(`  計算されたオフセット: (${positionOffset.x.toFixed(2)}, ${positionOffset.y.toFixed(2)}) → 実際の位置: (${textObj.position.x.toFixed(2)}, ${textObj.position.y.toFixed(2)})`);
+    //   console.log(`  色: ${textColor}`);
+    //   console.log(`  コンテナ可視性: ${container.visible}`);
+    //   console.log(`  テキストオブジェクト情報: 幅=${textObj.width.toFixed(2)}, 高さ=${textObj.height.toFixed(2)}`);
+    //   console.log(`  実際の表示幅: ${(textObj.width * textObj.scale.x).toFixed(2)}px`);
+    //   
+    //   if (scale !== 1.0 || positionOffset.x !== 0 || positionOffset.y !== 0) {
+    //     console.log(`  ⚠️ スケーリング/オフセット効果が適用されました！`);
+    //   } else {
+    //     console.log(`  ⚠️ スケーリング/オフセット効果が適用されていません`);
+    //   }
+    // }
     
     return true;
   }
