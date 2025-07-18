@@ -80,6 +80,16 @@ export interface StandardParameters {
   charPositionOffsetY?: number;
   charScalingSeed?: number;
   
+  // WordSlideText2用（退場アニメーション）
+  enableExitAnimation?: boolean;
+  exitCopyCount?: number;
+  exitFrameDelay?: number;
+  exitCopyScale?: number;
+  exitCopyColor?: string;
+  exitAnimationDuration?: number;
+  copyPositionRandomRange?: number;
+  copyPositionSeed?: number;
+  
   // MultiLineText固有の色設定
   inactiveColor?: string;
   activeColor?: string;
@@ -215,5 +225,15 @@ export const DEFAULT_PARAMETERS: StandardParameters = {
   charScaleMultiplier: 8.0,
   charPositionOffsetX: 20,
   charPositionOffsetY: 100,
-  charScalingSeed: 12345
+  charScalingSeed: 12345,
+  
+  // WordSlideText2用デフォルト値（退場アニメーション）
+  enableExitAnimation: true,
+  exitCopyCount: 3,
+  exitFrameDelay: 3,
+  exitCopyScale: 2.0,
+  exitCopyColor: '#FFFFFF',
+  exitAnimationDuration: 10,
+  copyPositionRandomRange: 50,
+  copyPositionSeed: 54321
 };

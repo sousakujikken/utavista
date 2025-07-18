@@ -346,14 +346,29 @@ export class UnifiedRestoreManager {
       // テンプレートのデフォルトパラメータを取得
       const defaultParams: any = {};
       if (typeof template.getParameterConfig === 'function') {
-        const params = template.getParameterConfig();
-        params.forEach((param: any) => {
+        const paramConfig = template.getParameterConfig();
+        paramConfig.forEach((param: any) => {
           defaultParams[param.name] = param.default;
         });
       }
 
+      // templateParamsが配列の場合は変換（本質的な修正）
+      let processedTemplateParams = templateParams;
+      if (Array.isArray(templateParams)) {
+        console.warn('UnifiedRestoreManager: templateParams is an array, converting to object');
+        processedTemplateParams = {};
+        if (templateParams.length > 0 && typeof templateParams[0] === 'object' && 'name' in templateParams[0]) {
+          // パラメータ設定配列の場合は変換
+          templateParams.forEach((param: any) => {
+            if (param.name && param.default !== undefined) {
+              processedTemplateParams[param.name] = param.default;
+            }
+          });
+        }
+      }
+
       // パラメータをマージ（空値をフィルタリング）
-      const mergedParams = { ...defaultParams, ...templateParams };
+      const mergedParams = { ...defaultParams, ...processedTemplateParams };
       
       // 空値や無効な値を除去
       const validParams: any = {};

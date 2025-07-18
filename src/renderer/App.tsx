@@ -329,16 +329,29 @@ function App() {
       }
       
       // 既存のパラメータを取得し、不足分をデフォルト値で補完
-      const existingParams = engineRef.current.parameterManager 
+      let existingParams = engineRef.current.parameterManager 
         ? engineRef.current.parameterManager.getGlobalDefaults() 
         : {};
+      
+      // 配列チェック（防御的プログラミング）
+      if (Array.isArray(existingParams)) {
+        console.error('[App] existingParams is an array, converting to empty object');
+        existingParams = {};
+      }
       
       // デフォルトパラメータを取得
       const defaultParams = {};
       const paramConfig = template.getParameterConfig();
-      paramConfig.forEach((param) => {
-        defaultParams[param.name] = param.default;
-      });
+      
+      if (Array.isArray(paramConfig)) {
+        paramConfig.forEach((param) => {
+          if (param && param.name && param.default !== undefined) {
+            defaultParams[param.name] = param.default;
+          }
+        });
+      } else {
+        console.error('[App] paramConfig is not an array:', paramConfig);
+      }
       
       // 既存のパラメータを優先し、新しいパラメータのみデフォルト値を設定
       const mergedParams = { ...defaultParams, ...existingParams };

@@ -233,6 +233,23 @@ export class ParameterManagerV2 {
       params = this.phraseParameters.get(phraseId)!;
     }
     
+    // 配列が渡された場合の緊急対応
+    if (Array.isArray(updates)) {
+      console.error('[ParameterManagerV2] updateParameters: Array passed instead of parameter object');
+      console.error('[ParameterManagerV2] objectId:', objectId);
+      console.error('[ParameterManagerV2] updates:', updates);
+      console.error('[ParameterManagerV2] This indicates a bug in the calling code');
+      
+      // パラメータ設定配列の場合は変換を試みる
+      if (ParameterValidator.isParameterConfigArray(updates)) {
+        console.error('[ParameterManagerV2] Converting parameter config array to parameter object');
+        updates = ParameterValidator.convertConfigToParams(updates) as Partial<StandardParameters>;
+      } else {
+        console.error('[ParameterManagerV2] Skipping invalid update');
+        return;
+      }
+    }
+    
     // パラメータを検証
     const validation = ParameterValidator.validate(updates);
     if (!validation.isValid) {
@@ -300,10 +317,18 @@ export class ParameterManagerV2 {
    * グローバルデフォルトの更新（統一的処理）
    */
   updateGlobalDefaults(updates: Partial<StandardParameters>): void {
-    // 配列チェック（デバッグ用）
+    // 配列チェック（防御的プログラミング）
     if (Array.isArray(updates)) {
-      console.error('ParameterManagerV2: updateGlobalDefaults に配列が渡されました:', updates);
-      return;
+      console.error('ParameterManagerV2: updateGlobalDefaults に配列が渡されました。これは通常起こるべきではありません。');
+      console.error('ParameterManagerV2: Stack trace:', new Error().stack);
+      
+      // パラメータ設定配列の場合は変換を試みる
+      if (ParameterValidator.isParameterConfigArray(updates)) {
+        updates = ParameterValidator.convertConfigToParams(updates) as Partial<StandardParameters>;
+      } else {
+        console.error('ParameterManagerV2: Skipping invalid update');
+        return;
+      }
     }
     
     const validation = ParameterValidator.validate(updates);
@@ -368,7 +393,14 @@ export class ParameterManagerV2 {
    * 新規フレーズ作成時のベース値として使用
    */
   getGlobalDefaults(): CompleteParameters {
-    return JSON.parse(JSON.stringify(this.globalDefaults));
+    // 配列チェック（防御的プログラミング）
+    if (Array.isArray(this.globalDefaults)) {
+      console.error('[ParameterManagerV2] globalDefaults is an array, reinitializing');
+      this.globalDefaults = this.createDefaultParameters();
+    }
+    
+    const result = JSON.parse(JSON.stringify(this.globalDefaults));
+    return result;
   }
   
   /**

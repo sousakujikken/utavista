@@ -879,6 +879,11 @@ export class Engine {
   // テンプレートのみを変更（歌詞データを保持）
   changeTemplate(template: IAnimationTemplate, params: Partial<StandardParameters> = {}, templateId?: string): boolean {
     try {
+      // パラメータの型チェック（配列を防ぐ）
+      if (Array.isArray(params)) {
+        console.error('[Engine] changeTemplate: params is an array, converting to empty object');
+        params = {};
+      }
       
       // 現在の歌詞データと状態を保持
       const currentLyrics = JSON.parse(JSON.stringify(this.phrases)); // ディープコピー
@@ -888,10 +893,17 @@ export class Engine {
       // テンプレートのパラメータ設定からデフォルトパラメータを取得
       const defaultParams = {};
       if (typeof template.getParameterConfig === 'function') {
-        const params = template.getParameterConfig();
-        params.forEach((param) => {
-          defaultParams[param.name] = param.default;
-        });
+        const paramConfig = template.getParameterConfig();
+        
+        if (Array.isArray(paramConfig)) {
+          paramConfig.forEach((param) => {
+            if (param && param.name && param.default !== undefined) {
+              defaultParams[param.name] = param.default;
+            }
+          });
+        } else {
+          console.error('[Engine] paramConfig is not an array:', paramConfig);
+        }
       } else {
         throw new Error(`Template ${template.constructor?.name || 'Unknown'} must implement getParameterConfig() method`);
       }
@@ -1796,10 +1808,7 @@ export class Engine {
     return this.projectStateManager;
   }
 
-  // TemplateManagerへのアクセサ
-  getTemplateManager() {
-    return this.templateManager;
-  }
+  // TemplateManagerへのアクセサ (この定義は削除し、後続のタイプ付きメソッドを使用)
 
   // インスタンスの強制再生成
   forceRecreateInstances(): void {
