@@ -17,6 +17,12 @@
       "name": "グリッチテキスト",
       "importPath": "./GlitchText",
       "exportName": "GlitchText"
+    },
+    {
+      "id": "wordslidetext2",
+      "name": "単語スライドテキスト2",
+      "importPath": "./WordSlideText2",
+      "exportName": "WordSlideText2"
     }
   ]
 }

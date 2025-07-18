@@ -45,8 +45,14 @@ export interface ValidationResult {
 
 /**
  * プロジェクトファイルの管理を行うクラス
+ * 
+ * バージョン管理について:
+ * - CURRENT_VERSION: プロジェクトファイル形式のバージョン（パッケージバージョンとは独立）
+ * - ファイル形式の互換性維持のため、破壊的変更時のみ更新
+ * - パッケージバージョン（package.json）とは異なる管理体系
  */
 export class ProjectFileManager {
+  /** プロジェクトファイル形式バージョン（ファイル互換性管理用） */
   private static readonly CURRENT_VERSION = '0.1.0';
   private static readonly FILE_EXTENSION = '.uta';
   

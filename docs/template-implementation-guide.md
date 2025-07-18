@@ -16,6 +16,7 @@
 10. [エラーハンドリングとデバッグ](#エラーハンドリングとデバッグ)
 11. [テンプレートレジストリへの登録](#テンプレートレジストリへの登録)
 12. [実装パターン総合ガイド](#実装パターン総合ガイド)
+13. [よくある失敗事例と対策](#よくある失敗事例と対策)
 
 ---
 
@@ -1133,6 +1134,229 @@ export class MyCustomTemplate implements IAnimationTemplate {
 
 ---
 
+## よくある失敗事例と対策
+
+実際のテンプレート開発で遭遇した問題と解決方法を紹介します。
+
+### 1. 高DPIディスプレイでの文字サイズ問題
+
+#### 失敗事例
+```typescript
+// 文字拡大エフェクト実装時
+textObj = TextStyleFactory.createHighDPIText(text, {
+  fontSize: 93,  // 設定値
+  // ...
+});
+textObj.scale.set(8, 8); // 8倍拡大
+
+// 結果: Retinaディスプレイで想定の2倍の大きさに表示される
+```
+
+#### 原因
+`createHighDPIText()`はdevicePixelRatio（Retinaでは2.0）を考慮して：
+- フォントサイズを自動拡大: 93px → 186px
+- テキストscaleを自動縮小: 1.0 → 0.5
+- 最終的なスケール: 0.5 × 8 = 4倍（見た目は8倍相当だが、ベースサイズが2倍）
+
+#### 対策
+```typescript
+// 正確なサイズ制御が必要な場合はcreateText()を使用
+textObj = TextStyleFactory.createText(text, {
+  fontSize: 93,  // この値がそのまま使用される
+  // ...
+});
+textObj.scale.set(8, 8); // 期待通りの8倍拡大
+```
+
+### 2. 文字スケーリング効果が適用されない問題
+
+#### 失敗事例
+```typescript
+renderCharContainer(...) {
+  // 毎フレーム新しいTextオブジェクトを作成
+  const textObj = new PIXI.Text(text, style);
+  textObj.scale.set(8, 8);  // スケール設定
+  container.addChild(textObj);
+  
+  // 次のフレームでremoveVisualElementsが呼ばれて削除される
+}
+```
+
+#### 原因
+`removeVisualElements`が毎フレーム呼ばれ、設定したスケールごとTextオブジェクトが削除される
+
+#### 対策
+```typescript
+// animateContainerで文字レベルの場合は削除をスキップ
+if (hierarchyType !== 'char') {
+  this.removeVisualElements!(container);
+}
+
+// removeVisualElementsでテキストオブジェクトを保護
+if (child instanceof PIXI.Text && child.name === 'text') {
+  childrenToKeep.push(child);
+}
+
+// renderCharContainerでオブジェクトを再利用
+let textObj = container.getChildByName('text') as PIXI.Text;
+if (!textObj) {
+  textObj = TextStyleFactory.createText(text, style);
+  textObj.name = 'text';  // 重要: 名前を設定
+  container.addChild(textObj);
+}
+```
+
+### 3. パラメータ検証エラー
+
+#### 失敗事例
+```
+ParameterValidator.ts:60 Parameter validation errors: 
+['Unknown parameter: enableCharScaling', 'Unknown parameter: charScaleMultiplier', ...]
+```
+
+#### 原因
+新しいパラメータを`getParameterConfig()`に追加したが、`StandardParameters.ts`に登録していない
+
+#### 対策
+```typescript
+// StandardParameters.tsに追加
+export interface StandardParameters {
+  // ... 既存のパラメータ
+  
+  // 新規パラメータを追加
+  enableCharScaling?: boolean;
+  charScaleMultiplier?: number;
+  charPositionOffsetX?: number;
+  charPositionOffsetY?: number;
+  charScalingSeed?: number;
+}
+
+// DEFAULT_PARAMETERSにも追加
+export const DEFAULT_PARAMETERS: StandardParameters = {
+  // ... 既存のデフォルト値
+  
+  enableCharScaling: true,
+  charScaleMultiplier: 8.0,
+  charPositionOffsetX: 20,
+  charPositionOffsetY: 100,
+  charScalingSeed: 12345,
+};
+```
+
+### 4. Engine.tsでのパラメータ配列エラー
+
+#### 失敗事例
+```
+Parameter validation errors: ['Unknown parameter: 0', 'Unknown parameter: 1', ...]
+```
+
+#### 原因
+Engine.tsの`changeTemplate`メソッドで、配列形式の`params`が誤って`updateGlobalDefaults`に渡される
+
+#### 現状と対策
+これはEngine側のバグですが、実際の動作には影響しません。将来的な修正案：
+```typescript
+// Engine.ts changeTemplateメソッド内
+const mergedParams = { ...defaultParams };
+// paramsが配列の場合はスキップ
+if (!Array.isArray(params)) {
+  Object.assign(mergedParams, params);
+}
+```
+
+### 5. ランダム値が毎フレーム変化する問題
+
+#### 失敗事例
+```typescript
+// 毎フレーム異なるランダム値が生成される
+const offsetX = (Math.random() - 0.5) * 40;
+const offsetY = (Math.random() - 0.5) * 200;
+textObj.position.set(offsetX, offsetY);
+```
+
+#### 原因
+`Math.random()`は毎回異なる値を返すため、文字が震え続ける
+
+#### 対策
+```typescript
+// 文字IDベースの決定論的ランダム生成
+function generateCharacterOffset(charId: string, seed: number, rangeX: number, rangeY: number) {
+  let hash = seed;
+  for (let i = 0; i < charId.length; i++) {
+    hash = ((hash << 5) - hash) + charId.charCodeAt(i);
+    hash = hash & hash; // 32bit integer変換
+  }
+  
+  // ハッシュから擬似ランダム生成
+  let rng = Math.abs(hash) + 1;
+  const nextRandom = () => {
+    rng = ((rng * 1103515245) + 12345) & 0x7fffffff;
+    return rng / 0x7fffffff;
+  };
+  
+  const x = (nextRandom() - 0.5) * rangeX;
+  const y = (nextRandom() - 0.5) * rangeY;
+  
+  return { x, y };
+}
+
+// 使用例
+const charId = params.id || `char_${startMs}_${text}`;
+const offset = generateCharacterOffset(charId, seed, 40, 200);
+```
+
+### 6. デバッグ時のパフォーマンス問題
+
+#### 失敗事例
+```typescript
+// 毎フレームログ出力でパフォーマンス低下
+console.log(`Frame ${frameCounter}: ${詳細情報...}`);
+```
+
+#### 対策
+```typescript
+// グローバルフレームカウンター
+let frameCounter = 0;
+let lastLogFrame = 0;
+
+// 10フレームごとにログ出力
+frameCounter++;
+if (frameCounter - lastLogFrame >= 10) {
+  lastLogFrame = frameCounter;
+  console.log(`=== フレーム ${frameCounter} ===`);
+  console.log(詳細情報...);
+}
+
+// または確率的なログ出力
+if (Math.random() < 0.1) { // 10%の確率
+  console.log(デバッグ情報...);
+}
+```
+
+### 7. フレーズが重複表示される問題
+
+#### 失敗事例
+同じフレーズが複数重なって表示される
+
+#### 原因の可能性
+- 階層構造の処理が正しく行われていない
+- コンテナの削除・再作成タイミングの問題
+- 親子関係の設定ミス
+
+#### デバッグ方法
+```typescript
+// フレーズコンテナ処理時のログ追加
+if (frameCounter % 10 === 0) {
+  console.log(`=== フレーズコンテナ処理 ===`);
+  console.log(`フレーズテキスト: "${text}"`);
+  console.log(`コンテナ名: ${container.name}`);
+  console.log(`子コンテナ数: ${container.children.length}`);
+  console.log(`位置: (${container.position.x}, ${container.position.y})`);
+}
+```
+
+---
+
 ## まとめ
 
 このガイドでは、UTAVISTA v0.4.2における包括的なテンプレート実装手順を説明しました。
@@ -1144,12 +1368,14 @@ export class MyCustomTemplate implements IAnimationTemplate {
 3. **エラーハンドリング**: 多層フォールバックシステム
 4. **パラメータ管理**: 型安全なパラメータアクセス
 5. **JSON駆動登録**: 動的なテンプレート登録システム
+6. **失敗事例からの学習**: よくある問題とその対策
 
 ### 次のステップ
 
 1. このガイドを参考に基本テンプレートを作成
 2. 既存テンプレートを参考に機能を拡張
-3. パフォーマンス測定とデバッグ
-4. テンプレートレジストリへの登録とテスト
+3. 失敗事例を確認して問題を回避
+4. パフォーマンス測定とデバッグ
+5. テンプレートレジストリへの登録とテスト
 
 高品質なテンプレート実装により、UTAVISTAの表現力を大幅に向上させることができます。

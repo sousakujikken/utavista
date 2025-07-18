@@ -73,6 +73,13 @@ export interface StandardParameters {
   randomRangeY?: number;
   minDistanceFromPrevious?: number;
   
+  // WordSlideText2用（文字スケーリング）
+  enableCharScaling?: boolean;
+  charScaleMultiplier?: number;
+  charPositionOffsetX?: number;
+  charPositionOffsetY?: number;
+  charScalingSeed?: number;
+  
   // MultiLineText固有の色設定
   inactiveColor?: string;
   activeColor?: string;
@@ -201,5 +208,12 @@ export const DEFAULT_PARAMETERS: StandardParameters = {
   glitchColorShift: true,
   glitchThreshold: 0.3,
   glitchWaveSpeed: 2.0,
-  glitchRandomness: 0.5
+  glitchRandomness: 0.5,
+  
+  // WordSlideText2用デフォルト値（文字スケーリング）
+  enableCharScaling: true,
+  charScaleMultiplier: 8.0,
+  charPositionOffsetX: 20,
+  charPositionOffsetY: 100,
+  charScalingSeed: 12345
 };
