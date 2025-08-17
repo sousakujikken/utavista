@@ -321,6 +321,40 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
     setWordSplitModalPhrase(null);
   };
 
+  // 上の行とマージ
+  const mergeWithPreviousPhrase = (currentPhraseId: string) => {
+    const currentIndex = lyrics.findIndex(phrase => phrase.id === currentPhraseId);
+    if (currentIndex <= 0) return; // 最初の行はマージできない
+
+    const currentPhrase = lyrics[currentIndex];
+    const previousPhrase = lyrics[currentIndex - 1];
+
+    // テキストを結合（スペースで区切る）
+    const mergedText = previousPhrase.phrase + ' ' + currentPhrase.phrase;
+
+    // マージ先フレーズの時間範囲を拡張し、テキストを更新
+    const mergedPhrase: PhraseUnit = {
+      ...previousPhrase,
+      phrase: mergedText,
+      start: previousPhrase.start,
+      end: currentPhrase.end, // 終了時刻を現在の行まで拡張
+      words: [] // 新しいテキストで再構築されるため空にする
+    };
+
+    // 新しいテキストで単語・文字構造を再構築
+    const updatedMergedPhrase = updatePhraseText(mergedPhrase, mergedText);
+
+    // 歌詞配列を更新（現在の行を削除し、前の行を更新）
+    const updatedLyrics = lyrics.filter((_, index) => index !== currentIndex)
+                                 .map(phrase => 
+                                   phrase.id === previousPhrase.id ? updatedMergedPhrase : phrase
+                                 );
+
+    // 文字インデックスを再計算
+    const lyricsWithIndices = calculateCharacterIndices(updatedLyrics);
+    engine.updateLyricsData(lyricsWithIndices);
+  };
+
   // 時間フォーマット（秒単位で表示、1ms精度）
   const formatTime = (ms: number): string => {
     return (ms / 1000).toFixed(3);
@@ -388,7 +422,7 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
             </tr>
           </thead>
           <tbody>
-            {lyrics.map((phrase) => (
+            {lyrics.map((phrase, index) => (
               <tr key={phrase.id}>
                 <td 
                   className="editable-cell"
@@ -453,6 +487,16 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
                   >
                     単語分割
                   </Button>
+                  {index > 0 && (
+                    <Button 
+                      variant="info"
+                      size="small"
+                      onClick={() => mergeWithPreviousPhrase(phrase.id)}
+                      title="上の行とマージ"
+                    >
+                      ↑マージ
+                    </Button>
+                  )}
                   <Button 
                     variant="success"
                     size="small"

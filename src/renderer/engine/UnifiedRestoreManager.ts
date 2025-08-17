@@ -3,6 +3,7 @@ import { ParameterManagerV2 } from './ParameterManagerV2';
 import { ProjectStateManager } from './ProjectStateManager';
 import { TemplateManager } from './TemplateManager';
 import { InstanceManager } from './InstanceManager';
+import { ParameterProcessor } from '../utils/ParameterProcessor';
 import { IAnimationTemplate } from '../types/types';
 import { 
   NormalizedProjectData, 
@@ -335,11 +336,36 @@ export class UnifiedRestoreManager {
     try {
 
       // テンプレートレジストリからテンプレートを取得
-      const { getTemplateById } = await import('../templates/registry/templateRegistry');
-      const template = getTemplateById(templateId);
+      const { getTemplateById, getFirstTemplateId, getAvailableTemplateIds } = await import('../templates/registry/templateRegistry');
+      let template = getTemplateById(templateId);
+      let actualTemplateId = templateId;
       
       if (!template) {
         console.warn(`UnifiedRestoreManager: テンプレート ${templateId} が見つかりません`);
+        
+        // フォールバック: 最初に登録されているテンプレートを使用
+        const fallbackTemplateId = getFirstTemplateId();
+        if (fallbackTemplateId) {
+          template = getTemplateById(fallbackTemplateId);
+          actualTemplateId = fallbackTemplateId;
+          console.log(`UnifiedRestoreManager: フォールバックテンプレートを使用: ${fallbackTemplateId}`);
+          
+          // UI側にテンプレート変更を通知
+          window.dispatchEvent(new CustomEvent('template-fallback-applied', {
+            detail: {
+              originalTemplateId: templateId,
+              fallbackTemplateId: fallbackTemplateId,
+              availableTemplates: getAvailableTemplateIds()
+            }
+          }));
+        } else {
+          console.error('UnifiedRestoreManager: 利用可能なテンプレートがありません');
+          return;
+        }
+      }
+      
+      if (!template) {
+        console.error('UnifiedRestoreManager: フォールバックテンプレートの取得に失敗しました');
         return;
       }
 
@@ -352,23 +378,11 @@ export class UnifiedRestoreManager {
         });
       }
 
-      // templateParamsが配列の場合は変換（本質的な修正）
-      let processedTemplateParams = templateParams;
-      if (Array.isArray(templateParams)) {
-        console.warn('UnifiedRestoreManager: templateParams is an array, converting to object');
-        processedTemplateParams = {};
-        if (templateParams.length > 0 && typeof templateParams[0] === 'object' && 'name' in templateParams[0]) {
-          // パラメータ設定配列の場合は変換
-          templateParams.forEach((param: any) => {
-            if (param.name && param.default !== undefined) {
-              processedTemplateParams[param.name] = param.default;
-            }
-          });
-        }
-      }
+      // templateParamsを安全に正規化
+      const processedTemplateParams = ParameterProcessor.normalizeToParameterObject(templateParams);
 
-      // パラメータをマージ（空値をフィルタリング）
-      const mergedParams = { ...defaultParams, ...processedTemplateParams };
+      // パラメータを安全にマージ（スプレッド構文を使わない）
+      const mergedParams = ParameterProcessor.mergeParameterObjects(defaultParams, processedTemplateParams);
       
       // 空値や無効な値を除去
       const validParams: any = {};
@@ -378,9 +392,9 @@ export class UnifiedRestoreManager {
         }
       }
 
-      // テンプレートマネージャーを更新
-      this.templateManager.registerTemplate(templateId, template, {name: templateId}, true);
-      this.templateManager.setDefaultTemplateId(templateId);
+      // テンプレートマネージャーを更新（実際に使用するテンプレートIDを使用）
+      this.templateManager.registerTemplate(actualTemplateId, template, {name: actualTemplateId}, true);
+      this.templateManager.setDefaultTemplateId(actualTemplateId);
 
       // 個別設定フレーズのテンプレート割り当てを保護
       // templateAssignmentsがある場合は、既存の割り当てを保護

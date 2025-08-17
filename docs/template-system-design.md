@@ -170,9 +170,11 @@ removeVisualElements(container: PIXI.Container): void {
 
 ## テンプレートパラメータの動的UI生成
 
-### パラメータ設定の独特なアプローチ
+### パラメータ管理システム（v0.4.3で大幅刷新）
 
+**従来の方式（v0.4.2以前）**:
 ```typescript
+// ❌ 非推奨: 各テンプレートで個別にパラメータを定義
 getParameterConfig(): ParameterConfig[] {
   return [
     {
@@ -183,24 +185,33 @@ getParameterConfig(): ParameterConfig[] {
       max: 1,
       step: 0.1,
       description: "点滅の強度"
-    },
-    {
-      name: "enableGlow", 
-      type: "boolean",
-      default: true,
-      description: "グローエフェクトの有効化"
     }
   ];
 }
 ```
 
-**動的UI生成の利点**:
-1. **テンプレート固有**: 各テンプレートが独自のパラメータセットを定義
-2. **型安全性**: TypeScriptの型情報と連携
-3. **バリデーション**: min/max/step による入力制限
+**新しい方式（v0.4.3以降）**:
+```typescript
+// ✅ 推奨: ParameterRegistryで事前登録
+// /src/renderer/utils/ParameterRegistry.ts で一元管理
+this.registerParameter({
+  name: 'flickerIntensity',
+  type: 'number',
+  category: 'template-specific',
+  templateId: 'flickerfadetemplate',
+  defaultValue: 0.8,
+  min: 0,
+  max: 1,
+  description: '点滅の強度'
+});
+```
 
-**従来の静的UI方式との違い**:
-- すべてのテンプレートで共通UIではなく、個別最適化
+**新システムの利点**:
+1. **パラメータ乱造の防止**: 登録されていないパラメータは使用不可
+2. **一元管理**: すべてのパラメータが単一の場所で定義・管理
+3. **型安全性の強化**: コンパイル時＋実行時の二重チェック
+4. **開発効率の向上**: 自動検証ツールによる整合性チェック
+5. **バリデーション**: min/max/step による入力制限と値範囲チェック
 - パラメータの意味・制約をテンプレート側で定義
 - UIコンポーネントの自動生成
 

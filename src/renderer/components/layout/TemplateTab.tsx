@@ -50,6 +50,9 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
   // 前回のパラメータを記録するRef
   const prevParamsRef = useRef<Record<string, any>>({});
   
+  // 最新のselectedObjectIdsを保持するRef
+  const selectedObjectIdsRef = useRef<string[]>(selectedObjectIds);
+  
   // onTemplateChangeをメモ化
   const memoizedOnTemplateChange = useCallback(onTemplateChange, []);
   
@@ -60,6 +63,12 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     // 現在のグローバルテンプレートIDをエンジンから取得して同期
     const currentTemplateId = engine.getTemplateManager().getDefaultTemplateId();
     if (currentTemplateId !== selectedTemplate) {
+      // スリープ復帰直後の自動テンプレート変更を防止
+      // document.hiddenがfalseになった直後（500ms以内）は変更をスキップ
+      if (document.wasHidden && (Date.now() - (document as any).lastVisibilityChangeTime) < 500) {
+        console.log('[TemplateTab] Skipping template change during sleep recovery');
+        return;
+      }
       // 親コンポーネントのselectedTemplateを更新
       memoizedOnTemplateChange(currentTemplateId);
     }
@@ -84,8 +93,61 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     syncWithEngineState();
   }, [syncWithEngineState]);
   
+  // selectedObjectIdsRef を最新の状態に保つ
+  useEffect(() => {
+    selectedObjectIdsRef.current = selectedObjectIds;
+  }, [selectedObjectIds]);
+  
+  // 選択変更時の個別設定状態更新（別のuseEffectで処理）
+  useEffect(() => {
+    if (!engine || selectedObjectIds.length === 0) return;
+    
+    // 少し遅延させて無限ループを回避
+    const timeoutId = setTimeout(() => {
+      const currentIds = selectedObjectIdsRef.current;
+      if (currentIds.length > 0) {
+        let enabledCount = 0;
+        if (engine.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
+          enabledCount = currentIds.filter(id => 
+            engine.parameterManagerV2.isIndividualSettingEnabled(id)
+          ).length;
+        }
+        const currentStatus = enabledCount === currentIds.length;
+        
+        console.log('[TemplateTab] Selection changed, updating individual settings status:', {
+          selectedObjectIds: currentIds,
+          currentStatus
+        });
+        
+        if (state.useIndividualSettings !== currentStatus) {
+          console.log('[TemplateTab] Selection update - before:', {
+            useIndividualSettings: state.useIndividualSettings,
+            editorMode: state.editorMode,
+            currentStatus
+          });
+          
+          updateState({ useIndividualSettings: currentStatus });
+          
+          console.log('[TemplateTab] Selection update - after:', {
+            useIndividualSettings: currentStatus,
+            editorMode: state.editorMode
+          });
+        }
+      }
+    }, 100);
+    
+    return () => clearTimeout(timeoutId);
+  }, [selectedObjectIds, engine, updateState]);
+  
   // タブがフォーカスされた時にも同期（手動で呼び出し可能にする）
   useEffect(() => {
+    // スリープ復帰検知のためのvisibilitychangeイベントを追跡
+    const handleVisibilityChange = () => {
+      (document as any).lastVisibilityChangeTime = Date.now();
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
     // タブ切り替えを検知するためのカスタムイベントリスナー
     const handleTabFocus = () => {
       syncWithEngineState();
@@ -123,6 +185,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     window.addEventListener('project-loaded', handleProjectLoaded);
     
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('template-tab-focused', handleTabFocus);
       window.removeEventListener('project-loaded', handleProjectLoaded);
     };
@@ -746,6 +809,9 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
   // フォント更新のためのリロード状態
   const [fontReloadTrigger, setFontReloadTrigger] = useState(0);
   
+  // 強制再レンダリング用の状態
+  const [forceUpdate, setForceUpdate] = useState(0);
+  
   // 選択中のオブジェクトの個別パラメータをクリア（フレーズレベル統一）
   const handleClearSelectedObjectParams = useCallback(() => {
     if (!engine || selectedObjectIds.length === 0) return;
@@ -762,13 +828,37 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       : `選択された ${phraseIds.size}個のフレーズの個別設定をクリアしますか？`;
     
     if (window.confirm(confirmMessage)) {
+      console.log('[TemplateTab] Clearing individual settings for phrases:', Array.from(phraseIds));
+      
       // エンジンでフレーズレベルの個別パラメータをクリア
       const success = engine.clearSelectedObjectParams(Array.from(phraseIds));
       
       if (success) {
+        console.log('[TemplateTab] Clear operation successful, forcing immediate UI state update');
+        
+        // 即座に状態を false に設定（クリア操作の結果を即座に反映）
+        console.log('[TemplateTab] Clear update - before:', {
+          useIndividualSettings: state.useIndividualSettings,
+          editorMode: state.editorMode
+        });
+        
+        updateState({ useIndividualSettings: false });
+        
+        console.log('[TemplateTab] Clear update - after:', {
+          useIndividualSettings: false,
+          editorMode: state.editorMode
+        });
         
         // パラメータ表示をクリア
         setObjectParams({});
+        
+        // 強制再レンダリングを発生させて即座にUI更新
+        setTimeout(() => {
+          setForceUpdate(prev => prev + 1);
+          console.log('[TemplateTab] Force re-render triggered after clear');
+        }, 10);
+        
+        console.log('[TemplateTab] Individual settings cleared, UI state updated');
         
         // UIフィードバックのためにカスタムイベントを発火
         const event = new CustomEvent('params-cleared', {
@@ -782,7 +872,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
         console.error('TemplateTab: 個別パラメータのクリアに失敗しました');
       }
     }
-  }, [engine, selectedObjectIds, selectedObjectType]);
+  }, [engine, selectedObjectIds, selectedObjectType, updateState, setForceUpdate]);
 
   // オブジェクトの個別設定を有効化（フレーズレベル統一）
   const handleEnableIndividualSettings = useCallback(() => {
@@ -988,26 +1078,99 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
   
   // 個別設定の現在の状態を取得
   const getIndividualSettingCurrentStatus = useCallback(() => {
-    if (!engine || selectedObjectIds.length === 0) return false;
+    const currentIds = selectedObjectIdsRef.current;
+    if (!engine || currentIds.length === 0) return false;
     
     // 選択されたオブジェクトのうち、個別設定が有効になっているものの数を確認（V2対応）
     let enabledCount = 0;
     
     if (engine.isUsingParameterManagerV2 && engine.isUsingParameterManagerV2()) {
       // V2モード: 個別設定が有効かチェック
-      enabledCount = selectedObjectIds.filter(id => 
+      enabledCount = currentIds.filter(id => 
         engine.parameterManagerV2.isIndividualSettingEnabled(id)
       ).length;
     } else {
       // V1モード: 従来の方法（現在はV2のみのため使用されない）
-      enabledCount = selectedObjectIds.filter(id => 
+      enabledCount = currentIds.filter(id => 
         engine.parameterManager?.isIndividualSettingEnabled?.(id) || false
       ).length;
     }
     
     // 全て有効化されている場合のみtrueを返す
-    return enabledCount === selectedObjectIds.length;
-  }, [engine, selectedObjectIds]);
+    return enabledCount === currentIds.length;
+  }, [engine]);
+  
+  // 個別設定状態のリアルタイム監視
+  useEffect(() => {
+    const handleIndividualSettingChanged = (event: Event) => {
+      if (!engine) return;
+      
+      console.log('[TemplateTab] Individual setting change detected:', {
+        eventType: event.type,
+        detail: (event as CustomEvent).detail,
+        currentSelectedObjectIds: selectedObjectIdsRef.current
+      });
+      
+      // getIndividualSettingCurrentStatusを使用して最新の状態を取得
+      const currentStatus = getIndividualSettingCurrentStatus();
+      
+      console.log('[TemplateTab] Updating useIndividualSettings:', {
+        currentStatus,
+        previousState: state.useIndividualSettings,
+        editorMode: state.editorMode,
+        selectedObjectIds: selectedObjectIdsRef.current
+      });
+      
+      // 状態を更新
+      console.log('[TemplateTab] State update - before:', {
+        useIndividualSettings: state.useIndividualSettings,
+        editorMode: state.editorMode
+      });
+      
+      updateState({ useIndividualSettings: currentStatus });
+      
+      console.log('[TemplateTab] State update - after:', {
+        useIndividualSettings: currentStatus,
+        editorMode: state.editorMode
+      });
+      
+      // 強制再レンダリングを発生させて即座にUI更新
+      setTimeout(() => {
+        setForceUpdate(prev => prev + 1);
+        console.log('[TemplateTab] Force re-render triggered after event');
+      }, 10);
+    };
+
+    // 個別設定変更イベントをリスン
+    window.addEventListener('objects-activated', handleIndividualSettingChanged);
+    window.addEventListener('objects-deactivated', handleIndividualSettingChanged);
+
+    return () => {
+      window.removeEventListener('objects-activated', handleIndividualSettingChanged);
+      window.removeEventListener('objects-deactivated', handleIndividualSettingChanged);
+    };
+  }, [engine, getIndividualSettingCurrentStatus, updateState]);
+  
+  // state.useIndividualSettingsが変更された時にログを出力
+  useEffect(() => {
+    console.log('[TemplateTab] state.useIndividualSettings changed:', {
+      useIndividualSettings: state.useIndividualSettings,
+      selectedObjectIds,
+      editorMode: state.editorMode,
+      timestamp: new Date().toLocaleTimeString()
+    });
+    
+    // 状態変更後に少し遅延してボタン表示チェック
+    setTimeout(() => {
+      const shouldShow = state.useIndividualSettings && state.editorMode === 'selection';
+      console.log('[TemplateTab] Post-state-change button check:', {
+        shouldShow,
+        useIndividualSettings: state.useIndividualSettings,
+        editorMode: state.editorMode,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }, 50);
+  }, [state.useIndividualSettings, selectedObjectIds, state.editorMode]);
   
   // 選択されたテンプレートのパラメータ情報を取得
   const getTemplateParamConfig = (templateId: string) => {
@@ -1186,39 +1349,28 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
               <p>選択された {selectedObjectIds.length}個の{selectedObjectType} のパラメータを一括調整</p>
             )}
             
-            {/* 個別設定・グローバル設定切り替えスイッチ */}
-            <div className="individual-setting-switch-section">
-              <div className="switch-container">
-                <label className="switch-label">
-                  <span className="switch-text">
-                    設定モード: {state.useIndividualSettings ? '個別設定' : 'グローバル設定'}
-                  </span>
-                  <div className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={state.useIndividualSettings}
-                      onChange={(e) => handleIndividualSettingToggle(e.target.checked)}
-                      className="switch-input"
-                    />
-                    <span className="switch-slider"></span>
-                  </div>
-                </label>
+            {/* 個別設定状態表示 */}
+            {state.useIndividualSettings && state.editorMode === 'selection' && (
+              <div className="individual-setting-status-section">
+                <p className="individual-mode-description">
+                  💡 個別設定モード: このオブジェクト専用の設定が適用されます（緑色マーカー表示）
+                </p>
               </div>
-              <div className="switch-description">
-                {state.useIndividualSettings ? (
-                  <p className="individual-mode-description">
-                    💡 個別設定モード: このオブジェクト専用の設定が適用されます（緑色マーカー表示）
-                  </p>
-                ) : (
-                  <p className="global-mode-description">
-                    💡 グローバル設定モード: プロジェクト全体の設定が適用されます
-                  </p>
-                )}
-              </div>
-            </div>
+            )}
             
             {/* 個別設定がONの場合のみクリアボタンを表示 */}
-            {state.useIndividualSettings && (
+            {(() => {
+              const shouldShowButton = state.useIndividualSettings && state.editorMode === 'selection';
+              console.log('[TemplateTab] Clear button visibility check:', {
+                shouldShowButton,
+                useIndividualSettings: state.useIndividualSettings,
+                editorMode: state.editorMode,
+                selectedObjectIdsLength: selectedObjectIds.length,
+                forceUpdate,
+                timestamp: new Date().toLocaleTimeString()
+              });
+              return shouldShowButton;
+            })() && (
               <div className="clear-params-section">
                 <button 
                   className="clear-params-button"

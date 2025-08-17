@@ -4,6 +4,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as fsSync from 'fs';
 import type { ExportOptions, ExportProgress, ExportError } from '../shared/types';
 import { BatchVideoProcessor } from './BatchVideoProcessor';
 
@@ -379,10 +380,50 @@ export function setupExportHandlers() {
     fileName: string;
     includeMusicTrack?: boolean;
     audioPath?: string;
+    audioStartTime?: number;
+    audioEndTime?: number;
     outputPath?: string;
+    backgroundVideoPath?: string;
+    backgroundVideoLoop?: boolean;
+    totalDurationMs?: number;
+    outputWidth?: number;
+    outputHeight?: number;
   }) => {
+    console.log('🎯 [exportManager] export:composeFinalVideo IPC受信');
+    console.log('🎯 [exportManager] options:', JSON.stringify(options, null, 2));
+    
+    // ファイル出力で確実にログを残す（動画出力先ディレクトリに保存）
+    const outputBaseDir = options.outputPath ? path.dirname(options.outputPath) : (process.env.HOME ? path.join(process.env.HOME, 'Desktop') : '/tmp');
+    const logDir = path.join(outputBaseDir, 'debug_logs');
+    
+    // ログディレクトリを作成
     try {
+      fsSync.mkdirSync(logDir, { recursive: true });
+    } catch (error) {
+      // ディレクトリ作成失敗時はデスクトップに保存
+      console.warn('Failed to create log directory:', error);
+    }
+    
+    const logPath = path.join(logDir, 'main_process_debug.log');
+    const logMessage = `
+[${new Date().toISOString()}] MAIN PROCESS LOG - export:composeFinalVideo IPC受信
+SessionId: ${options.sessionId}
+BatchVideos: ${options.batchVideos.length} files
+BackgroundVideo: ${options.backgroundVideoPath || 'なし'}
+BackgroundVideoLoop: ${options.backgroundVideoLoop}
+TotalDurationMs: ${options.totalDurationMs}
+OutputWidth: ${options.outputWidth}
+OutputHeight: ${options.outputHeight}
+`;
+    fsSync.appendFileSync(logPath, logMessage);
+    
+    try {
+      console.log('🎯 [exportManager] BatchVideoProcessor.composeFinalVideo を呼び出し');
+      fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] BatchVideoProcessor.composeFinalVideo 呼び出し開始\n`);
+      
       const outputPath = await exportManager.batchVideoProcessor.composeFinalVideo(options);
+      
+      fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] BatchVideoProcessor.composeFinalVideo 完了: ${outputPath}\n`);
       
       // 完了通知をレンダラーに送信
       exportManager.batchVideoProcessor.sendCompletedToRenderer(outputPath);
@@ -390,6 +431,7 @@ export function setupExportHandlers() {
       return outputPath;
     } catch (error) {
       console.error('Failed to compose final video:', error);
+      fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] エラー: ${error}\n`);
       throw error;
     }
   });
@@ -412,6 +454,16 @@ export function setupExportHandlers() {
     }
   });
   
+  // Video metadata retrieval handler
+  ipcMain.handle('export:getVideoMetadata', async (event, videoPath: string) => {
+    try {
+      return await exportManager.batchVideoProcessor.getFFmpegWrapper().getVideoMetadata(videoPath);
+    } catch (error) {
+      console.error('Failed to get video metadata:', error);
+      throw error;
+    }
+  });
+
   // Video export save dialog handler
   ipcMain.handle('export:showSaveDialogForVideo', async (event, defaultFileName: string) => {
     try {

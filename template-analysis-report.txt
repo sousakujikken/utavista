@@ -1,0 +1,131 @@
+=== COMPREHENSIVE TEMPLATE ANALYSIS REPORT ===
+Analysis Date: 2025-08-04T14:50:39.510Z
+Total Templates Analyzed: 11
+
+📊 PATTERN DISTRIBUTION:
+  class-instance: 2 templates (18.2%)
+  object-literal: 8 templates (72.7%)
+  unknown: 1 templates (9.1%)
+
+🎯 COMPLEXITY DISTRIBUTION:
+  high: 4 templates (36.4%)
+  medium: 6 templates (54.5%)
+  low: 1 templates (9.1%)
+
+🚀 MIGRATION READINESS:
+  Ready for Migration: 1 templates
+  Needs Preparation: 6 templates
+  Complex Migration: 4 templates
+
+📋 DETAILED TEMPLATE ANALYSIS:
+
+EASY MIGRATION (1 templates):
+  ❌ MultiLineStackTemplate
+     Pattern: unknown
+     Methods: []
+     Exports: default
+     Issues: 17
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (1:23)
+       ❌ Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (2:37)
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (5:28)
+       ... and 14 more issues
+
+MODERATE MIGRATION (6 templates):
+  ❌ FlickerFadeTemplate
+     Pattern: object-literal
+     Methods: [removeVisualElements, animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer]
+     Exports: default+named
+     Issues: 7
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (1:23)
+       ❌ Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (2:37)
+       ❌ Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (3:34)
+       ... and 4 more issues
+
+  ❌ GlitchText
+     Pattern: object-literal
+     Methods: [removeVisualElements, animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer]
+     Exports: default+named
+     Issues: 3
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (1:23)
+       ❌ Parameter 'child' implicitly has an 'any' type. (133:32)
+       ❌ Parameter 'child' implicitly has an 'any' type. (383:36)
+
+  ❌ MultiLineText
+     Pattern: object-literal
+     Methods: [removeVisualElements, animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer]
+     Exports: default+named
+     Issues: 3
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (1:23)
+       ❌ Parameter 'child' implicitly has an 'any' type. (188:32)
+       ❌ Parameter 'child' implicitly has an 'any' type. (463:36)
+
+  ❌ WordSlideText
+     Pattern: object-literal
+     Methods: [removeVisualElements, animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer]
+     Exports: default+named
+     Issues: 6
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (1:23)
+       ❌ Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (2:37)
+       ❌ Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (3:34)
+       ... and 3 more issues
+
+  ❌ WordSlideText2
+     Pattern: object-literal
+     Methods: [removeVisualElements, animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer]
+     Exports: default+named
+     Issues: 5
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (1:23)
+       ❌ Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (2:37)
+       ❌ Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (3:34)
+       ... and 2 more issues
+
+  ❌ WordSlideTextLLM
+     Pattern: object-literal
+     Methods: [removeVisualElements, animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer]
+     Exports: default+named
+     Issues: 6
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (7:23)
+       ❌ Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (8:37)
+       ❌ Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (9:34)
+       ... and 3 more issues
+
+COMPLEX MIGRATION (4 templates):
+  ❌ BlurFadeTemplate
+     Pattern: class-instance
+     Methods: [animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer, removeVisualElements]
+     Exports: named
+     Issues: 24
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (12:23)
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (13:28)
+       ❌ Module '"../types/types"' has no exported member 'StandardParameters'. (16:3)
+       ... and 21 more issues
+
+  ❌ PhraseBlurFadeTemplate
+     Pattern: class-instance
+     Methods: [animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer, removeVisualElements]
+     Exports: named
+     Issues: 13
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (13:23)
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (14:28)
+       ❌ Module '"../types/types"' has no exported member 'StandardParameters'. (17:3)
+       ... and 10 more issues
+
+  ❌ PhraseSyncTextPrimitive
+     Pattern: object-literal
+     Methods: [animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer, removeVisualElements]
+     Exports: named
+     Issues: 18
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (6:23)
+       ❌ Cannot find module '../primitives'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (13:8)
+       ❌ Type '{ license: string; licenseUrl: string; originalAuthor: string; description: string; }' is missing the following properties from type 'TemplateMetadata': name, version (21:3)
+       ... and 15 more issues
+
+  ❌ WordSlideTextPrimitive
+     Pattern: object-literal
+     Methods: [removeVisualElements, animateContainer, renderPhraseContainer, renderWordContainer, renderCharContainer]
+     Exports: named
+     Issues: 8
+       ❌ Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (6:23)
+       ❌ Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (7:37)
+       ❌ Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option? (8:34)
+       ... and 5 more issues

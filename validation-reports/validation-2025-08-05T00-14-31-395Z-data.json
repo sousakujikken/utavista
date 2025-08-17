@@ -1,0 +1,34 @@
+{
+  "sessionId": "validation-1754352871020",
+  "timestamp": "2025-08-05T00:14:31.394Z",
+  "config": {
+    "templateDir": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates",
+    "skipRuntimeTests": false,
+    "generateDetailedReport": true,
+    "validateTypes": true,
+    "checkMemoryLeaks": true
+  },
+  "results": {
+    "totalTemplates": 0,
+    "validTemplates": 0,
+    "invalidTemplates": 0,
+    "results": [],
+    "overallValid": true
+  },
+  "performanceMetrics": {
+    "totalTime": 374,
+    "templatesPerSecond": 0,
+    "memoryUsage": {
+      "rss": 139509760,
+      "heapTotal": 34668544,
+      "heapUsed": 15518872,
+      "external": 2531329,
+      "arrayBuffers": 86116
+    }
+  },
+  "compilerResults": {
+    "success": true,
+    "errors": [],
+    "warnings": []
+  }
+}

@@ -1,0 +1,1176 @@
+{
+  "totalTemplates": 11,
+  "patternDistribution": {
+    "class-instance": 2,
+    "object-literal": 8,
+    "unknown": 1
+  },
+  "complexityDistribution": {
+    "high": 4,
+    "medium": 6,
+    "low": 1
+  },
+  "migrationReadiness": {
+    "ready": 1,
+    "needsWork": 6,
+    "complex": 4
+  },
+  "templates": [
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/BlurFadeTemplate.ts",
+      "templateName": "BlurFadeTemplate",
+      "pattern": "class-instance",
+      "exports": {
+        "hasDefault": false,
+        "hasNamed": true,
+        "namedExports": [
+          "BlurFadeTemplate"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer",
+          "removeVisualElements"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 12,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 13,
+            "column": 28
+          }
+        },
+        {
+          "type": "error",
+          "message": "Module '\"../types/types\"' has no exported member 'StandardParameters'.",
+          "location": {
+            "line": 16,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Property 'metadata' in type 'BlurFadeTemplateClass' is not assignable to the same property in base type 'IAnimationTemplate'.\n  Type '{ license: string; licenseUrl: string; originalAuthor: string; }' is missing the following properties from type 'TemplateMetadata': name, version, description",
+          "location": {
+            "line": 25,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 37,
+            "column": 84
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 38,
+            "column": 61
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 39,
+            "column": 64
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 40,
+            "column": 63
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 41,
+            "column": 69
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 42,
+            "column": 72
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 45,
+            "column": 86
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 46,
+            "column": 86
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 47,
+            "column": 91
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 50,
+            "column": 61
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 51,
+            "column": 90
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 52,
+            "column": 84
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 55,
+            "column": 95
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 56,
+            "column": 96
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and 'description' does not exist in type 'ParameterConfig'.",
+          "location": {
+            "line": 59,
+            "column": 61
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'filter' implicitly has an 'any' type.",
+          "location": {
+            "line": 358,
+            "column": 33
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 370,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 383,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'filter' implicitly has an 'any' type.",
+          "location": {
+            "line": 386,
+            "column": 33
+          }
+        },
+        {
+          "type": "warning",
+          "message": "Template missing default export - may cause import issues"
+        }
+      ],
+      "complexity": "high",
+      "migrationEffort": "complex"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/FlickerFadeTemplate.ts",
+      "templateName": "FlickerFadeTemplate",
+      "pattern": "object-literal",
+      "exports": {
+        "hasDefault": true,
+        "hasNamed": true,
+        "namedExports": [
+          "FlickerFadeTemplate"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "removeVisualElements",
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 1,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 2,
+            "column": 37
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 3,
+            "column": 34
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and '_debugTemplateName' does not exist in type 'IAnimationTemplate'.",
+          "location": {
+            "line": 74,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 168,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "'params.words' is of type 'unknown'.",
+          "location": {
+            "line": 428,
+            "column": 47
+          }
+        },
+        {
+          "type": "error",
+          "message": "'params.words' is of type 'unknown'.",
+          "location": {
+            "line": 438,
+            "column": 25
+          }
+        }
+      ],
+      "complexity": "medium",
+      "migrationEffort": "moderate"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/GlitchText.ts",
+      "templateName": "GlitchText",
+      "pattern": "object-literal",
+      "exports": {
+        "hasDefault": true,
+        "hasNamed": true,
+        "namedExports": [
+          "GlitchText"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "removeVisualElements",
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 1,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 133,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 383,
+            "column": 36
+          }
+        }
+      ],
+      "complexity": "medium",
+      "migrationEffort": "moderate"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/MultiLineStackTemplate.ts",
+      "templateName": "MultiLineStackTemplate",
+      "pattern": "unknown",
+      "exports": {
+        "hasDefault": true,
+        "hasNamed": false,
+        "namedExports": []
+      },
+      "structure": {
+        "hasMetadata": false,
+        "hasGetParameterConfig": false,
+        "implementedMethods": [],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 1,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 2,
+            "column": 37
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 5,
+            "column": 28
+          }
+        },
+        {
+          "type": "error",
+          "message": "Type 'string' is not assignable to type 'TemplateAuthor'.",
+          "location": {
+            "line": 62,
+            "column": 5
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot invoke an object which is possibly 'undefined'.",
+          "location": {
+            "line": 141,
+            "column": 7
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot invoke an object which is possibly 'undefined'.",
+          "location": {
+            "line": 147,
+            "column": 16
+          }
+        },
+        {
+          "type": "error",
+          "message": "Expected 8 arguments, but got 7.",
+          "location": {
+            "line": 147,
+            "column": 21
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot invoke an object which is possibly 'undefined'.",
+          "location": {
+            "line": 149,
+            "column": 16
+          }
+        },
+        {
+          "type": "error",
+          "message": "Expected 8 arguments, but got 7.",
+          "location": {
+            "line": 149,
+            "column": 21
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot invoke an object which is possibly 'undefined'.",
+          "location": {
+            "line": 151,
+            "column": 16
+          }
+        },
+        {
+          "type": "error",
+          "message": "Expected 8 arguments, but got 7.",
+          "location": {
+            "line": 151,
+            "column": 21
+          }
+        },
+        {
+          "type": "error",
+          "message": "Property 'applyEffects' does not exist on type 'IAnimationTemplate'.",
+          "location": {
+            "line": 340,
+            "column": 10
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'part' implicitly has an 'any' type.",
+          "location": {
+            "line": 355,
+            "column": 43
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'part' implicitly has an 'any' type.",
+          "location": {
+            "line": 356,
+            "column": 43
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 420,
+            "column": 32
+          }
+        },
+        {
+          "type": "warning",
+          "message": "Template does not implement getParameterConfig() - will have no configurable parameters"
+        },
+        {
+          "type": "error",
+          "message": "Template does not implement any animation methods"
+        }
+      ],
+      "complexity": "low",
+      "migrationEffort": "easy"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/MultiLineText.ts",
+      "templateName": "MultiLineText",
+      "pattern": "object-literal",
+      "exports": {
+        "hasDefault": true,
+        "hasNamed": true,
+        "namedExports": [
+          "MultiLineText"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "removeVisualElements",
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 1,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 188,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 463,
+            "column": 36
+          }
+        }
+      ],
+      "complexity": "medium",
+      "migrationEffort": "moderate"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/PhraseBlurFadeTemplate.ts",
+      "templateName": "PhraseBlurFadeTemplate",
+      "pattern": "class-instance",
+      "exports": {
+        "hasDefault": false,
+        "hasNamed": true,
+        "namedExports": [
+          "PhraseBlurFadeTemplate"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer",
+          "removeVisualElements"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 13,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 14,
+            "column": 28
+          }
+        },
+        {
+          "type": "error",
+          "message": "Module '\"../types/types\"' has no exported member 'StandardParameters'.",
+          "location": {
+            "line": 17,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '../primitives'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 28,
+            "column": 8
+          }
+        },
+        {
+          "type": "error",
+          "message": "Property 'metadata' in type 'PhraseBlurFadeTemplateClass' is not assignable to the same property in base type 'IAnimationTemplate'.\n  Type '{ license: string; licenseUrl: string; originalAuthor: string; description: string; }' is missing the following properties from type 'TemplateMetadata': name, version",
+          "location": {
+            "line": 31,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Type 'string' is not assignable to type 'TemplateAuthor'.",
+          "location": {
+            "line": 34,
+            "column": 5
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'charContainer' implicitly has an 'any' type.",
+          "location": {
+            "line": 204,
+            "column": 8
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'charData' implicitly has an 'any' type.",
+          "location": {
+            "line": 204,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'filter' implicitly has an 'any' type.",
+          "location": {
+            "line": 285,
+            "column": 33
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 296,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 308,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'filter' implicitly has an 'any' type.",
+          "location": {
+            "line": 311,
+            "column": 33
+          }
+        },
+        {
+          "type": "warning",
+          "message": "Template missing default export - may cause import issues"
+        }
+      ],
+      "complexity": "high",
+      "migrationEffort": "complex"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/PhraseSyncTextPrimitive.ts",
+      "templateName": "PhraseSyncTextPrimitive",
+      "pattern": "object-literal",
+      "exports": {
+        "hasDefault": false,
+        "hasNamed": true,
+        "namedExports": [
+          "PhraseSyncTextPrimitive"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer",
+          "removeVisualElements"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 6,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '../primitives'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 13,
+            "column": 8
+          }
+        },
+        {
+          "type": "error",
+          "message": "Type '{ license: string; licenseUrl: string; originalAuthor: string; description: string; }' is missing the following properties from type 'TemplateMetadata': name, version",
+          "location": {
+            "line": 21,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Type 'string' is not assignable to type 'TemplateAuthor'.",
+          "location": {
+            "line": 24,
+            "column": 5
+          }
+        },
+        {
+          "type": "error",
+          "message": "'private' modifier cannot be used here.",
+          "location": {
+            "line": 56,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot assign to 'SlideAnimationPrimitive' because it is an import.",
+          "location": {
+            "line": 56,
+            "column": 27
+          }
+        },
+        {
+          "type": "error",
+          "message": "'private' modifier cannot be used here.",
+          "location": {
+            "line": 57,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot assign to 'EnhancedCumulativeLayoutPrimitive' because it is an import.",
+          "location": {
+            "line": 57,
+            "column": 28
+          }
+        },
+        {
+          "type": "error",
+          "message": "Property 'slideAnimation' does not exist on type 'IAnimationTemplate'.",
+          "location": {
+            "line": 99,
+            "column": 25
+          }
+        },
+        {
+          "type": "error",
+          "message": "Property 'layoutPrimitive' does not exist on type 'IAnimationTemplate'.",
+          "location": {
+            "line": 171,
+            "column": 10
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'charContainer' implicitly has an 'any' type.",
+          "location": {
+            "line": 174,
+            "column": 8
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'charData' implicitly has an 'any' type.",
+          "location": {
+            "line": 174,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Property 'slideAnimation' does not exist on type 'IAnimationTemplate'.",
+          "location": {
+            "line": 229,
+            "column": 29
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'filter' implicitly has an 'any' type.",
+          "location": {
+            "line": 270,
+            "column": 33
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 281,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 293,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'filter' implicitly has an 'any' type.",
+          "location": {
+            "line": 296,
+            "column": 33
+          }
+        },
+        {
+          "type": "warning",
+          "message": "Template missing default export - may cause import issues"
+        }
+      ],
+      "complexity": "high",
+      "migrationEffort": "complex"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/WordSlideText.ts",
+      "templateName": "WordSlideText",
+      "pattern": "object-literal",
+      "exports": {
+        "hasDefault": true,
+        "hasNamed": true,
+        "namedExports": [
+          "WordSlideText"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "removeVisualElements",
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 1,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 2,
+            "column": 37
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 3,
+            "column": 34
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and '_debugTemplateName' does not exist in type 'IAnimationTemplate'.",
+          "location": {
+            "line": 236,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 324,
+            "column": 32
+          }
+        },
+        {
+          "type": "error",
+          "message": "Property '_debugTemplateName' does not exist on type 'IAnimationTemplate'.",
+          "location": {
+            "line": 368,
+            "column": 28
+          }
+        }
+      ],
+      "complexity": "medium",
+      "migrationEffort": "moderate"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/WordSlideText2.ts",
+      "templateName": "WordSlideText2",
+      "pattern": "object-literal",
+      "exports": {
+        "hasDefault": true,
+        "hasNamed": true,
+        "namedExports": [
+          "WordSlideText2"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "removeVisualElements",
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 1,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 2,
+            "column": 37
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 3,
+            "column": 34
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and '_debugTemplateName' does not exist in type 'IAnimationTemplate'.",
+          "location": {
+            "line": 241,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 385,
+            "column": 32
+          }
+        }
+      ],
+      "complexity": "medium",
+      "migrationEffort": "moderate"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/WordSlideTextLLM.ts",
+      "templateName": "WordSlideTextLLM",
+      "pattern": "object-literal",
+      "exports": {
+        "hasDefault": true,
+        "hasNamed": true,
+        "namedExports": [
+          "WordSlideTextLLM"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "removeVisualElements",
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 7,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 8,
+            "column": 37
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 9,
+            "column": 34
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '../primitives'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 15,
+            "column": 8
+          }
+        },
+        {
+          "type": "error",
+          "message": "Object literal may only specify known properties, and '_debugTemplateName' does not exist in type 'IAnimationTemplate'.",
+          "location": {
+            "line": 144,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 230,
+            "column": 32
+          }
+        }
+      ],
+      "complexity": "medium",
+      "migrationEffort": "moderate"
+    },
+    {
+      "filePath": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates/WordSlideTextPrimitive.ts",
+      "templateName": "WordSlideTextPrimitive",
+      "pattern": "object-literal",
+      "exports": {
+        "hasDefault": false,
+        "hasNamed": true,
+        "namedExports": [
+          "WordSlideTextPrimitive"
+        ]
+      },
+      "structure": {
+        "hasMetadata": true,
+        "hasGetParameterConfig": true,
+        "implementedMethods": [
+          "removeVisualElements",
+          "animateContainer",
+          "renderPhraseContainer",
+          "renderWordContainer",
+          "renderCharContainer"
+        ],
+        "missingMethods": []
+      },
+      "issues": [
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi.js'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 6,
+            "column": 23
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '@pixi/filter-advanced-bloom'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 7,
+            "column": 37
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module 'pixi-filters'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 8,
+            "column": 34
+          }
+        },
+        {
+          "type": "error",
+          "message": "Cannot find module '../primitives'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?",
+          "location": {
+            "line": 15,
+            "column": 8
+          }
+        },
+        {
+          "type": "error",
+          "message": "Type '{ license: string; licenseUrl: string; originalAuthor: string; description: string; }' is missing the following properties from type 'TemplateMetadata': name, version",
+          "location": {
+            "line": 120,
+            "column": 3
+          }
+        },
+        {
+          "type": "error",
+          "message": "Type 'string' is not assignable to type 'TemplateAuthor'.",
+          "location": {
+            "line": 123,
+            "column": 5
+          }
+        },
+        {
+          "type": "error",
+          "message": "Parameter 'child' implicitly has an 'any' type.",
+          "location": {
+            "line": 198,
+            "column": 32
+          }
+        },
+        {
+          "type": "warning",
+          "message": "Template missing default export - may cause import issues"
+        }
+      ],
+      "complexity": "high",
+      "migrationEffort": "complex"
+    }
+  ]
+}

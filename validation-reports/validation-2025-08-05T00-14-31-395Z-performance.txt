@@ -1,0 +1,17 @@
+=== PERFORMANCE ANALYSIS REPORT ===
+Total Execution Time: 0.37 seconds
+Templates Processed: 0.00 per second
+
+💾 MEMORY USAGE:
+  Heap Used: 14.80 MB
+  Heap Total: 33.06 MB
+  RSS: 133.05 MB
+  External: 2.41 MB
+
+📈 PERFORMANCE ANALYSIS:
+  ⚠️ Slow processing detected
+  ✅ Low memory usage
+
+🎯 OPTIMIZATION RECOMMENDATIONS:
+  • Consider optimizing validation logic
+  • Memory usage is reasonable

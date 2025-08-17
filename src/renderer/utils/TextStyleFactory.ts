@@ -37,13 +37,6 @@ export class TextStyleFactory {
   }
   
   /**
-   * デバイスピクセル比を考慮したスケール係数を計算
-   */
-  static calculateDevicePixelScale(): number {
-    return (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
-  }
-  
-  /**
    * 統一されたパディング設定でPIXI.TextStyleを作成（解像度適応型）
    */
   static createTextStyle(options: TextStyleOptions): PIXI.TextStyle {
@@ -97,49 +90,29 @@ export class TextStyleFactory {
     exportHeight: number
   ): PIXI.Text {
     const resolutionScale = this.calculateResolutionScale(exportWidth, exportHeight);
-    const deviceScale = this.calculateDevicePixelScale();
     
-    // 解像度とデバイスピクセル比を考慮した最終スケール
-    const finalScale = Math.max(resolutionScale, deviceScale);
-    
+    // エクスポート時のみ解像度スケールを適用（デバイスピクセル比は無視）
     const exportOptions: TextStyleOptions = {
       ...options,
-      resolutionScale: finalScale
+      resolutionScale: resolutionScale
     };
     
     const textObj = this.createText(text, exportOptions);
     
     // テキストオブジェクトのスケールを逆算して調整（表示サイズを維持）
-    textObj.scale.set(1 / finalScale);
-    
-    if (import.meta.env.DEV && Math.random() < 0.05) { // 5%の確率でのみ出力
-    }
+    textObj.scale.set(1 / resolutionScale);
     
     return textObj;
   }
   
   /**
-   * 高DPI対応テキストを作成
+   * 標準テキストを作成（高DPI処理を無効化し、純粋な画面ピクセル数に基づく）
    * @param text テキスト内容
    * @param options 基本オプション
-   * @returns 高DPI対応テキストオブジェクト
+   * @returns 標準テキストオブジェクト
    */
   static createHighDPIText(text: string, options: TextStyleOptions): PIXI.Text {
-    const deviceScale = this.calculateDevicePixelScale();
-    
-    if (deviceScale <= 1) {
-      // 通常のディスプレイでは標準テキストを返す
-      return this.createText(text, options);
-    }
-    
-    const highDPIOptions: TextStyleOptions = {
-      ...options,
-      resolutionScale: deviceScale
-    };
-    
-    const textObj = this.createText(text, highDPIOptions);
-    textObj.scale.set(1 / deviceScale);
-    
-    return textObj;
+    // 高DPI処理を無効化し、純粋な画面ピクセル数に基づくレンダリング
+    return this.createText(text, options);
   }
 }

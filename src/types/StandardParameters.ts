@@ -134,7 +134,7 @@ export const DEFAULT_PARAMETERS: StandardParameters = {
   
   // レイアウト
   letterSpacing: 0,
-  lineHeight: 150,
+  lineHeight: 1.2,  // 倍率に修正（150px絶対値から1.2倍率に変更）
   offsetX: 0,
   offsetY: 0,
   
@@ -170,7 +170,7 @@ export const DEFAULT_PARAMETERS: StandardParameters = {
   charSpacing: 1.0,
   
   totalLines: 4,
-  lineSpacing: 150,
+  lineSpacing: 1.2,  // 倍率に修正（150px絶対値から1.2倍率に変更）
   resetInterval: 2000,
   manualLineNumber: -1,
   phraseOverlapThreshold: 1000,

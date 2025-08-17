@@ -1,4 +1,5 @@
 import { StandardParameters, DEFAULT_PARAMETERS } from '../types/StandardParameters';
+import { ParameterRegistry } from '../renderer/utils/ParameterRegistry';
 
 export class ParameterValidator {
   /**
@@ -43,7 +44,9 @@ export class ParameterValidator {
       };
     }
     
-    // 各パラメータの検証と正規化
+    // パラメータレジストリを使用した検証
+    const registry = ParameterRegistry.getInstance();
+    
     Object.entries(params as Record<string, unknown>).forEach(([key, value]) => {
       // templateIdは特別扱い（StandardParametersの一部ではないが有効）
       if (key === 'templateId') {
@@ -52,16 +55,17 @@ export class ParameterValidator {
         } else {
           errors.push(`Invalid type for ${key}: expected string, got ${typeof value}`);
         }
-      } else if (key in DEFAULT_PARAMETERS) {
-        const defaultValue = DEFAULT_PARAMETERS[key as keyof StandardParameters];
-        
-        if (typeof value === typeof defaultValue) {
+      } else if (registry.isRegistered(key)) {
+        // レジストリに登録されたパラメータの検証
+        const validation = registry.validateParameter(key, value);
+        if (validation.valid) {
           (sanitized as Record<string, unknown>)[key] = value;
         } else {
-          errors.push(`Invalid type for ${key}: expected ${typeof defaultValue}, got ${typeof value}`);
+          errors.push(validation.error!);
         }
       } else {
-        errors.push(`Unknown parameter: ${key}`);
+        // 不明なパラメータはサイレントに無視（ログのみ出力）
+        console.debug(`[ParameterValidator] Ignoring unknown parameter: ${key}`);
       }
     });
     

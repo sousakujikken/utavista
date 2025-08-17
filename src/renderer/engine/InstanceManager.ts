@@ -768,6 +768,9 @@ export class InstanceManager {
         
       }
       
+      // テンプレート更新後、全てのインスタンスの古い視覚要素をクリーンアップ
+      this.cleanupAllVisualElements();
+      
       return true;
     } catch (error) {
       console.error('InstanceManager: updateTemplate処理中にエラーが発生しました', error);
@@ -778,6 +781,19 @@ export class InstanceManager {
   // デフォルトパラメータを取得するメソッド
   getDefaultParams(): Record<string, any> {
     return this.defaultParams;
+  }
+  
+  // 全てのインスタンスの視覚要素をクリーンアップ
+  private cleanupAllVisualElements() {
+    for (const instance of this.instances.values()) {
+      if (instance.template.removeVisualElements && typeof instance.template.removeVisualElements === 'function') {
+        try {
+          instance.template.removeVisualElements(instance.container);
+        } catch (error) {
+          console.error(`cleanupAllVisualElements: エラー ${instance.id}:`, error);
+        }
+      }
+    }
   }
   
   // アクティブなインスタンスのIDセットを取得

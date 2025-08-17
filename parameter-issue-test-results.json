@@ -1,0 +1,31 @@
+{
+  "timestamp": "2025-07-18T21:37:21.596Z",
+  "findings": {
+    "rootCause": "Configuration array being passed to updateGlobalDefaults() instead of parameter object",
+    "mechanism": "Object.entries() on array creates numeric keys (0, 1, 2...) which are interpreted as parameter names",
+    "solution": "Add array check at the beginning of updateGlobalDefaults() method"
+  },
+  "wordSlideText2ParameterCount": 20,
+  "firstFewParameters": [
+    {
+      "name": "fontSize",
+      "default": 120
+    },
+    {
+      "name": "fontFamily",
+      "default": "Arial"
+    },
+    {
+      "name": "textColor",
+      "default": "#808080"
+    },
+    {
+      "name": "activeTextColor",
+      "default": "#FFFF80"
+    },
+    {
+      "name": "completedTextColor",
+      "default": "#FFF7EB"
+    }
+  ]
+}

@@ -21,6 +21,15 @@ export interface ElectronAPI {
   // Video export save dialog
   showSaveDialogForVideo(defaultFileName: string): Promise<string | null>;
   
+  // Video metadata
+  getVideoMetadata(videoPath: string): Promise<{
+    width: number;
+    height: number;
+    duration: number;
+    frameRate: number;
+    frameCount: number;
+  }>;
+  
   // Seek and Snap Video Export (new)
   createTempSession(sessionId: string): Promise<string>;
   saveFrameImage(sessionId: string, frameName: string, frameData: Uint8Array, width?: number, height?: number): Promise<string>;
@@ -40,7 +49,14 @@ export interface ElectronAPI {
     fileName: string;
     includeMusicTrack?: boolean;
     audioPath?: string;
+    audioStartTime?: number;
+    audioEndTime?: number;
     outputPath?: string;
+    backgroundVideoPath?: string;
+    backgroundVideoLoop?: boolean;
+    totalDurationMs?: number;
+    outputWidth?: number;
+    outputHeight?: number;
   }): Promise<string>;
   cleanupTempSession(sessionId: string): Promise<void>;
   getStorageStats(sessionId?: string): Promise<{

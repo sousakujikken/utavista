@@ -992,12 +992,14 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
       };
       
       // アクティベーション状態の変更をリスン
-      const handleObjectsActivated = () => {
+      const handleObjectsActivated = (event: CustomEvent) => {
+        console.log(`[TimelinePanel] objects-activated:`, event.detail?.phraseIds);
         // マーカーの再レンダリングをトリガーするために状態を更新
         setLyrics(prev => [...prev]);
       };
       
-      const handleObjectsDeactivated = () => {
+      const handleObjectsDeactivated = (event: CustomEvent) => {
+        console.log(`[TimelinePanel] objects-deactivated:`, event.detail?.phraseIds);
         // マーカーの再レンダリングをトリガーするために状態を更新
         setLyrics(prev => [...prev]);
       };

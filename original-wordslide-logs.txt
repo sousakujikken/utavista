@@ -1,0 +1,25 @@
+2025-08-02T06:02:26.744Z: [vite] connecting...
+2025-08-02T06:02:26.764Z: [vite] connected.
+2025-08-02T06:02:27.196Z: %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold
+2025-08-02T06:02:27.217Z: %cPixiJS Deprecation Warning: %c%s color:#614108;background:#fffbe6 font-weight:normal;color:#614108;background:#fffbe6 settings.FILTER_RESOLUTION is deprecated, use Filter.defaultResolution
+Deprecated since v7.1.0
+2025-08-02T06:02:27.217Z:     at http://localhost:5174/@fs/Users/hirocat/Library/Mobile%20Documents/com~apple~CloudDocs/development/visiblyrics/node_modules/.vite/deps/chunk-LISJWOE2.js?v=529dc804:246:133
+2025-08-02T06:02:27.217Z: console.groupEnd
+2025-08-02T06:02:27.218Z: [TemplateRegistry] Creating template registry, config: JSHandle@object
+2025-08-02T06:02:27.218Z: [TemplateRegistry] Loading template: wordslide_primitive (WordSlideTextPrimitive) - SUCCESS
+2025-08-02T06:02:27.218Z: [TemplateRegistry] Loaded 1 templates
+2025-08-02T06:02:27.313Z: TimelinePanel: Engine インスタンスが利用できません。モックデータを使用します。
+2025-08-02T06:02:27.313Z: NewLayout: Engineインスタンスがありません
+2025-08-02T06:02:27.313Z: [FontService] システムフォント取得エラー: JSHandle@error
+2025-08-02T06:02:27.314Z: TimelinePanel: Engine インスタンスが利用できません。モックデータを使用します。
+2025-08-02T06:02:27.317Z: NewLayout: Engineインスタンスがありません
+2025-08-02T06:02:27.317Z: [FontService] システムフォント取得エラー: JSHandle@error
+2025-08-02T06:02:27.318Z: [TemplateTab] state.useIndividualSettings changed: JSHandle@object
+2025-08-02T06:02:27.318Z: [TemplateTab] state.useIndividualSettings changed: JSHandle@object
+2025-08-02T06:02:27.318Z: FontService初期化エラー: JSHandle@error
+2025-08-02T06:02:27.318Z: FontService初期化エラー: JSHandle@error
+2025-08-02T06:02:27.385Z: [TemplateTab] Post-state-change button check: JSHandle@object
+2025-08-02T06:02:27.385Z: [TemplateTab] Post-state-change button check: JSHandle@object
+2025-08-02T06:02:27.449Z: [ParameterValidator] Validation errors: JSHandle@array
+2025-08-02T06:02:27.450Z: Global defaults validation errors: JSHandle@array
+2025-08-02T06:02:27.580Z: エンジン初期化エラー: JSHandle@error

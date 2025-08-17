@@ -8,6 +8,7 @@ import { GridOverlay } from '../utils/GridOverlay';
 import { DebugManager } from '../utils/debug';
 import { TemplateManager } from './TemplateManager';
 import { ParameterManagerV2 } from './ParameterManagerV2';
+import { ParameterProcessor } from '../utils/ParameterProcessor';
 import { ProjectStateManager } from './ProjectStateManager';
 import { calculateStageSize, getDefaultStageConfig } from '../utils/stageCalculator';
 import { persistenceService } from '../services/PersistenceService';
@@ -15,6 +16,7 @@ import { calculateCharacterIndices } from '../utils/characterIndexCalculator';
 import { RenderTexturePool } from './RenderTexturePool';
 import { StandardParameters } from '../types/StandardParameters';
 import { ParameterValidator } from '../utils/ParameterValidator';
+import { ParameterRegistry } from '../utils/ParameterRegistry';
 import { UnifiedRestoreManager } from './UnifiedRestoreManager';
 import { ProjectFileData, AutoSaveData } from '../../types/UnifiedProjectData';
 
@@ -36,6 +38,15 @@ export class Engine {
   charPositions: Map<string, {x: number, y: number}> = new Map();
   lastUpdateTime: number = 0;
   private updateFn: (delta: number) => void;
+  
+  // デバッグ更新のスロットリング用
+  private lastDebugUpdateTime: number = 0;
+  private readonly DEBUG_UPDATE_INTERVAL: number = 100; // 100ms間隔でデバッグ更新
+  
+  // スリープ検知用
+  private readonly MAX_ELAPSED_TIME: number = 100; // 最大経過時間（スリープ検知用）
+  private handleVisibilityChange?: () => void;
+  private wasRunningBeforeSleep: boolean = false;
   
   // 複数テンプレート対応のためのマネージャークラス
   templateManager: TemplateManager;
@@ -119,6 +130,22 @@ export class Engine {
       globalParams: { ...defaultParams },
       objectParams: {},
       defaultTemplateId: templateId
+    });
+    
+    // 個別設定変更リスナーの登録
+    this.parameterManager.addIndividualSettingListener('engine-timeline-sync', (phraseId: string, enabled: boolean) => {
+      console.log(`[Engine] Individual setting changed: ${phraseId} -> ${enabled}`);
+      
+      // TimelinePanel の再レンダリングをトリガーするイベントを発火
+      if (enabled) {
+        window.dispatchEvent(new CustomEvent('objects-activated', { 
+          detail: { phraseIds: [phraseId] }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('objects-deactivated', { 
+          detail: { phraseIds: [phraseId] }
+        }));
+      }
     });
     
     
@@ -210,6 +237,9 @@ export class Engine {
     // ウィンドウリサイズイベントの処理（メモリリーク防止のためbind済み参照を保存）
     this.boundHandleResize = this.handleResize.bind(this);
     window.addEventListener('resize', this.boundHandleResize);
+    
+    // システムスリープ/ウェイクイベントのハンドラを設定
+    this.setupSleepWakeHandlers();
     
     // updateFn をプロパティに保存して、ticker.remove 時に参照できるようにする
     this.updateFn = this.update.bind(this);
@@ -687,53 +717,61 @@ export class Engine {
   private update(delta: number) {
     if (!this.isRunning) return;
     
+    const now = performance.now();
+    let elapsed = now - this.lastUpdateTime;
+    
+    // スリープ検知: 異常に大きな経過時間を検出
+    if (elapsed > this.MAX_ELAPSED_TIME) {
+      console.log(`[Engine] Sleep recovery detected: ${elapsed}ms elapsed, limiting to ${this.MAX_ELAPSED_TIME}ms`);
+      elapsed = this.MAX_ELAPSED_TIME;
+      // lastUpdateTimeをリセットして、次のフレームから正常に動作するように
+      this.lastUpdateTime = now - elapsed;
+    }
+    
+    // 16ms以上経過している場合のみ更新（約60FPS）
+    if (elapsed < 16 && this.lastUpdateTime !== 0) {
+      return;
+    }
+    
     // 音楽プレイヤーの現在再生位置を直接参照して同期
     let newTime = this.currentTime;
     
     if (this.audioPlayer && this.audioPlayer.state() === 'loaded') {
-      // 音楽が読み込まれている場合は音楽の再生位置を参照
+      // 音楽が読み込まれている場合は音楽の再生位置を参照（オフセットを逆計算）
       try {
         const audioCurrentTime = this.audioPlayer.seek() * 1000; // ミリ秒に変換
         if (typeof audioCurrentTime === 'number' && !isNaN(audioCurrentTime)) {
-          newTime = audioCurrentTime;
+          const audioOffset = this.getAudioOffset();
+          newTime = audioCurrentTime - audioOffset; // オフセットを逆算してアニメーション時間を計算
         }
       } catch (error) {
         // 音楽プレイヤーからの時間取得に失敗した場合は独立した時間進行にフォールバック
-        const now = performance.now();
-        const elapsed = now - this.lastUpdateTime;
-        if (elapsed > 16 || this.lastUpdateTime === 0) {
-          newTime = this.currentTime + (elapsed || this.app.ticker.deltaMS);
-        }
+        newTime = this.currentTime + (elapsed || this.app.ticker.deltaMS);
       }
     } else {
       // 音楽が読み込まれていない場合は独立した時間進行
-      const now = performance.now();
-      const elapsed = now - this.lastUpdateTime;
-      if (elapsed > 16 || this.lastUpdateTime === 0) {
-        newTime = this.currentTime + (elapsed || this.app.ticker.deltaMS);
-      }
+      newTime = this.currentTime + (elapsed || this.app.ticker.deltaMS);
     }
     
-    // 前回の更新から16ms以上経過している場合のみ更新（約60FPS）
-    const now = performance.now();
-    const elapsed = now - this.lastUpdateTime;
-    if (elapsed > 16 || this.lastUpdateTime === 0) {
-      // 終了時刻チェック - タイムライン終端で自動停止
-      if (newTime >= this.audioDuration) {
-        this.currentTime = this.audioDuration;
-        this.pause();
-        this.dispatchCustomEvent('timeline-ended', { endTime: this.audioDuration });
-        return;
-      }
-      
-      this.currentTime = newTime;
-      this.lastUpdateTime = now;
-      
-      // インスタンスマネージャーの更新
-      this.instanceManager.update(this.currentTime);
-      
-      // デバッグ情報の更新（座標情報など）
+    // 終了時刻チェック - タイムライン終端で自動停止
+    if (newTime >= this.audioDuration) {
+      this.currentTime = this.audioDuration;
+      this.pause();
+      this.dispatchCustomEvent('timeline-ended', { endTime: this.audioDuration });
+      return;
+    }
+    
+    this.currentTime = newTime;
+    this.lastUpdateTime = now;
+    
+    // インスタンスマネージャーの更新
+    this.instanceManager.update(this.currentTime);
+    
+    // デバッグ情報の更新（スロットリング付き）
+    const debugElapsed = now - this.lastDebugUpdateTime;
+    if (debugElapsed >= this.DEBUG_UPDATE_INTERVAL) {
       this.updateDebugInfo();
+      this.lastDebugUpdateTime = now;
     }
   }
 
@@ -743,10 +781,13 @@ export class Engine {
     this.lastUpdateTime = performance.now();
     console.log('[Engine] 再生開始');
     
-    // 音声がある場合は再生
+    // 音声がある場合は再生（オフセットを適用）
     if (this.audioPlayer && this.audioPlayer.state() === 'loaded') {
-      this.audioPlayer.seek(this.currentTime / 1000); // 秒単位に変換
+      const audioOffset = this.getAudioOffset();
+      const adjustedTime = Math.max(0, (this.currentTime + audioOffset) / 1000); // 秒単位に変換、負の値は0にクランプ
+      this.audioPlayer.seek(adjustedTime);
       this.audioPlayer.play();
+      console.log(`[Engine] 音楽再生開始 - 現在時間: ${this.currentTime}ms, オフセット: ${audioOffset}ms, 調整後: ${adjustedTime}s`);
     } else {
       const state = this.audioPlayer ? this.audioPlayer.state() : 'none';
       console.warn(`Engine: 音声ファイルが読み込まれていないため、アニメーションのみ再生します (audioPlayer: ${this.audioPlayer ? '存在' : 'null'}, state: ${state})`);
@@ -779,15 +820,55 @@ export class Engine {
     this.lastUpdateTime = 0;
     this.instanceManager.update(this.currentTime);
     
-    // 音声がある場合はシーク
+    // 音声がある場合はリセット（オフセットを適用）
     if (this.audioPlayer) {
       this.audioPlayer.stop();
+      const audioOffset = this.getAudioOffset();
+      const adjustedTime = Math.max(0, audioOffset / 1000); // 秒単位に変換、負の値は0にクランプ
+      this.audioPlayer.seek(adjustedTime);
+      console.log(`[Engine] 音楽リセット - オフセット: ${audioOffset}ms, 調整後: ${adjustedTime}s`);
     }
     
     // 背景動画がある場合はリセット
     if (this.backgroundVideo) {
       this.backgroundVideo.pause();
       this.backgroundVideo.currentTime = 0;
+    }
+  }
+  
+  // システムスリープ/ウェイクイベントのハンドラ設定
+  private setupSleepWakeHandlers(): void {
+    // visibilitychangeイベントを使ってスリープ/ウェイクを検知
+    this.handleVisibilityChange = () => {
+      if (document.hidden) {
+        // ページがバックグラウンドに移った時（スリープの可能性）
+        console.log('[Engine] Page visibility hidden - possible sleep');
+        // タイマーを一時停止
+        if (this.isRunning) {
+          this.wasRunningBeforeSleep = true;
+          this.pause();
+        }
+      } else {
+        // ページがフォアグラウンドに戻った時（ウェイク）
+        console.log('[Engine] Page visibility visible - wake from sleep');
+        // lastUpdateTimeをリセット
+        this.lastUpdateTime = performance.now();
+        this.lastDebugUpdateTime = performance.now();
+        // スリープ前に再生中だった場合は再開
+        if (this.wasRunningBeforeSleep) {
+          this.wasRunningBeforeSleep = false;
+          this.play();
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+  }
+  
+  // スリープ/ウェイクイベントハンドラの削除
+  private removeSleepWakeHandlers(): void {
+    if (this.handleVisibilityChange) {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     }
   }
 
@@ -803,16 +884,31 @@ export class Engine {
     
     this.instanceManager.update(this.currentTime);
     
-    // 音声がある場合は再生中でなくてもシークを実行
+    // 音声がある場合は再生中でなくてもシークを実行（オフセットを適用）
     if (this.audioPlayer) {
       // 一時停止中でも音声の位置を更新
-      this.audioPlayer.seek(timeMs / 1000); // 秒単位に変換
+      const audioOffset = this.getAudioOffset();
+      const adjustedTime = Math.max(0, (timeMs + audioOffset) / 1000); // 秒単位に変換、負の値は0にクランプ
+      this.audioPlayer.seek(adjustedTime);
+      console.log(`[Engine] 音楽シーク - 現在時間: ${timeMs}ms, オフセット: ${audioOffset}ms, 調整後: ${adjustedTime}s`);
     } else {
     }
     
-    // 背景動画がある場合はシーク
+    // 背景動画がある場合はループを考慮してシーク
     if (this.backgroundVideo) {
-      this.backgroundVideo.currentTime = timeMs / 1000;
+      const videoTimeSeconds = timeMs / 1000;
+      const videoDuration = this.backgroundVideo.duration;
+      
+      if (videoDuration > 0) {
+        // 背景動画をループ再生として正しい時間にシーク
+        const loopedTime = videoTimeSeconds % videoDuration;
+        this.backgroundVideo.currentTime = loopedTime;
+        console.log(`[Engine] 背景動画シーク - 要求時間: ${videoTimeSeconds}s, 動画長: ${videoDuration}s, ループ時間: ${loopedTime}s`);
+      } else {
+        // videoDurationが取得できない場合はそのままシーク
+        this.backgroundVideo.currentTime = videoTimeSeconds;
+        console.log(`[Engine] 背景動画シーク - 要求時間: ${videoTimeSeconds}s (動画長不明)`);
+      }
     }
     
     // シーク操作後にタイムライン更新イベントを発火
@@ -890,26 +986,41 @@ export class Engine {
       const currentTime = this.currentTime;
       const isCurrentlyPlaying = this.isRunning;
       
-      // テンプレートのパラメータ設定からデフォルトパラメータを取得
-      const defaultParams = {};
-      if (typeof template.getParameterConfig === 'function') {
-        const paramConfig = template.getParameterConfig();
-        
-        if (Array.isArray(paramConfig)) {
-          paramConfig.forEach((param) => {
-            if (param && param.name && param.default !== undefined) {
-              defaultParams[param.name] = param.default;
-            }
-          });
-        } else {
-          console.error('[Engine] paramConfig is not an array:', paramConfig);
-        }
-      } else {
-        throw new Error(`Template ${template.constructor?.name || 'Unknown'} must implement getParameterConfig() method`);
-      }
+      // パラメータレジストリからデフォルトパラメータを取得
+      const registry = ParameterRegistry.getInstance();
       
-      // パラメータをマージ（引数のparamsが優先）
-      const mergedParams = { ...defaultParams, ...params };
+      // 標準パラメータとテンプレート固有パラメータを組み合わせ
+      const standardParams: Record<string, any> = {};
+      const templateParams: Record<string, any> = {};
+      
+      // 標準パラメータのデフォルト値を設定
+      const allParams = registry.getAllParameters();
+      allParams.forEach((definition, name) => {
+        if (definition.category === 'standard') {
+          standardParams[name] = definition.defaultValue;
+        } else if (definition.category === 'template-specific' && definition.templateId === templateId) {
+          templateParams[name] = definition.defaultValue;
+        }
+      });
+      
+      const defaultParams = { ...standardParams, ...templateParams };
+      // console.log('[Engine] defaultParams type:', Array.isArray(defaultParams) ? 'Array' : typeof defaultParams);
+      // console.log('[Engine] defaultParams keys:', Object.keys(defaultParams).slice(0, 5));
+      
+      // パラメータオブジェクトを安全にマージ
+      // console.log('[Engine] Input params before normalization:', {
+      //   type: Array.isArray(params) ? 'Array' : typeof params,
+      //   keys: Array.isArray(params) ? 'Array indices' : Object.keys(params as any).slice(0, 5),
+      //   firstValue: Array.isArray(params) ? params[0] : Object.values(params as any)[0]
+      // });
+      
+      const normalizedParams = ParameterProcessor.normalizeToParameterObject(params);
+      // console.log('[Engine] normalizedParams type:', Array.isArray(normalizedParams) ? 'Array' : typeof normalizedParams);
+      // console.log('[Engine] normalizedParams keys:', Object.keys(normalizedParams).slice(0, 5));
+      
+      const mergedParams = ParameterProcessor.mergeParameterObjects(defaultParams, normalizedParams);
+      // console.log('[Engine] mergedParams type:', Array.isArray(mergedParams) ? 'Array' : typeof mergedParams);
+      // console.log('[Engine] mergedParams keys:', Object.keys(mergedParams).slice(0, 5));
       
       // テンプレートIDを決定（指定がなければ現在のデフォルトIDを使用）
       const actualTemplateId = templateId || this.templateManager.getDefaultTemplateId();
@@ -1316,12 +1427,34 @@ export class Engine {
   }
   
   /**
+   * ElectronMediaManagerから現在のファイルパスを取得してaudioFilePathを更新
+   */
+  private async updateAudioFilePathFromElectronManager() {
+    try {
+      const { electronMediaManager } = await import('../services/ElectronMediaManager');
+      const currentPath = electronMediaManager.getCurrentAudioFilePath();
+      if (currentPath) {
+        this.audioFilePath = currentPath;
+        console.log(`[Engine] audioFilePathを更新: "${this.audioFilePath}"`);
+      } else {
+        console.warn(`[Engine] ElectronMediaManagerからファイルパスを取得できませんでした`);
+      }
+    } catch (error) {
+      console.error(`[Engine] ElectronMediaManagerからのファイルパス取得に失敗:`, error);
+    }
+  }
+  
+  /**
    * HTMLAudioElement/HTMLVideoElementから音声を読み込み（Electron用）
    */
   loadAudioElement(audioElement: HTMLAudioElement | HTMLVideoElement, fileName?: string) {
     
     // AudioElementからHowlを作成
     this.audioFileName = fileName || 'electron-audio';
+    
+    // ElectronMediaManagerから現在のファイルパスを取得して更新（非同期）
+    this.updateAudioFilePathFromElectronManager();
+    
     this.audioPlayer = new Howl({
       src: [audioElement.src],
       format: ['mp3', 'wav', 'ogg', 'm4a'],
@@ -1392,8 +1525,16 @@ export class Engine {
         clearInterval(this.autoSaveTimer);
       }
       
+      // 個別設定変更リスナーを削除
+      if (this.parameterManager) {
+        this.parameterManager.removeIndividualSettingListener('engine-timeline-sync');
+      }
+      
       // リサイズイベントリスナーを削除（正しい参照を使用）
       window.removeEventListener('resize', this.boundHandleResize);
+      
+      // スリープ/ウェイクイベントリスナーを削除
+      this.removeSleepWakeHandlers();
       
       // インスタンスマネージャーをクリーンアップ
       if (this.instanceManager) {
@@ -1555,6 +1696,12 @@ export class Engine {
       const result = this.templateManager.assignTemplate(objectId, templateId);
       
       if (result) {
+        // 個別テンプレート設定時は個別設定を自動有効化
+        if (this.isPhraseId(objectId)) {
+          console.log(`[Engine] Auto-enabling individual setting for template change: ${objectId}`);
+          this.parameterManager.enableIndividualSetting(objectId);
+        }
+        
         // 統合されたインスタンス更新処理
         this.performInstanceUpdate(objectId, templateId);
         
@@ -1919,6 +2066,15 @@ export class Engine {
     return this.currentTime;
   }
   
+  // 音楽オフセット値を取得するメソッド
+  getAudioOffset(): number {
+    if (this.projectStateManager) {
+      const currentState = this.projectStateManager.getCurrentState();
+      return currentState.audioOffset || 0;
+    }
+    return 0;
+  }
+  
   // =============================================================================
   // Undo/Redo 機能
   // =============================================================================
@@ -2219,14 +2375,15 @@ export class Engine {
   /**
    * 背景動画を設定
    */
-  setBackgroundVideo(videoFilePath: string, fitMode: BackgroundFitMode = 'cover'): void {
+  setBackgroundVideo(videoFilePath: string, fitMode: BackgroundFitMode = 'cover', loop: boolean = false): void {
     this.clearBackgroundMedia();
     
     this.backgroundConfig = {
       type: 'video',
       videoFilePath,
       fitMode,
-      backgroundColor: this.backgroundConfig.backgroundColor
+      backgroundColor: this.backgroundConfig.backgroundColor,
+      videoLoop: loop
     };
     
     // HTML5 Video要素を作成
@@ -2239,7 +2396,7 @@ export class Engine {
     } else {
       video.src = videoFilePath;
     }
-    video.loop = true;
+    video.loop = loop; // ループ設定を適用
     video.muted = true; // 自動再生のためにミュート
     video.playsInline = true;
     
@@ -2271,7 +2428,7 @@ export class Engine {
   /**
    * HTMLVideoElementから背景動画を設定（Electron用）
    */
-  setBackgroundVideoElement(video: HTMLVideoElement, fitMode: BackgroundFitMode = 'cover', fileName?: string): void {
+  setBackgroundVideoElement(video: HTMLVideoElement, fitMode: BackgroundFitMode = 'cover', fileName?: string, loop: boolean = false): void {
     this.clearBackgroundMedia();
     
     // ファイル名を保存（復元用）
@@ -2283,8 +2440,12 @@ export class Engine {
       type: 'video',
       videoFilePath: fileName || 'loaded',
       fitMode,
-      backgroundColor: this.backgroundConfig.backgroundColor
+      backgroundColor: this.backgroundConfig.backgroundColor,
+      videoLoop: loop
     };
+    
+    // ループ設定を適用
+    video.loop = loop;
     
     // すでに読み込まれている動画からテクスチャを作成
     const texture = PIXI.Texture.from(video);
@@ -2397,6 +2558,11 @@ export class Engine {
       if (this.backgroundVideoSprite) {
         this.applyBackgroundFitMode(this.backgroundVideoSprite, config.fitMode);
       }
+    }
+    
+    // ループ設定の更新
+    if (config.videoLoop !== undefined && this.backgroundVideo) {
+      this.backgroundVideo.loop = config.videoLoop;
     }
   }
   
@@ -2681,13 +2847,19 @@ export class Engine {
       const renderTexture = this.renderTexturePool.acquire();
       
       try {
-        // 現在のステージサイズを取得
+        // 🔧 固定ベースサイズを使用（プレビュー表示と同じ手法）
+        // 動的なstage.width/heightではなく、設定されたbaseWidth/baseHeightを使用
+        const baseWidth = this.stageConfig.baseWidth;
+        const baseHeight = this.stageConfig.baseHeight;
+        
+        // スケーリング計算（固定ベースサイズから出力サイズに合わせる）
+        const scaleX = outputWidth / baseWidth;
+        const scaleY = outputHeight / baseHeight;
+        
+        // 🔧 デバッグログ：サイズ比較
         const currentStageWidth = this.app.stage.width;
         const currentStageHeight = this.app.stage.height;
-        
-        // スケーリング計算（出力サイズに合わせる）
-        const scaleX = outputWidth / currentStageWidth;
-        const scaleY = outputHeight / currentStageHeight;
+        console.log(`🎯 [FIXED_SIZE_CAPTURE] Base: ${baseWidth}x${baseHeight}, Stage: ${currentStageWidth}x${currentStageHeight}, Output: ${outputWidth}x${outputHeight}, Scale: ${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
         
         // 現在のスケールを保存
         const originalScaleX = this.app.stage.scale.x;
@@ -2992,6 +3164,13 @@ export class Engine {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.autoSaveEnabled) {
         this.autoSaveToLocalStorage();
+      } else if (!document.hidden) {
+        // ページが表示状態に戻った時（システムスリープからの復帰を含む）
+        // lastUpdateTimeをリセットして時間の不整合を防ぐ
+        if (this.isRunning) {
+          this.lastUpdateTime = performance.now();
+          // console.log('[Engine] Page visibility restored, reset lastUpdateTime');
+        }
       }
     });
     
@@ -2999,6 +3178,15 @@ export class Engine {
     window.addEventListener('blur', () => {
       if (this.autoSaveEnabled) {
         this.autoSaveToLocalStorage();
+      }
+    });
+    
+    // ウィンドウがフォーカスを取り戻したとき
+    window.addEventListener('focus', () => {
+      // フォーカス復帰時もlastUpdateTimeをリセット
+      if (this.isRunning) {
+        this.lastUpdateTime = performance.now();
+        // console.log('[Engine] Window focus restored, reset lastUpdateTime');
       }
     });
     
@@ -3082,9 +3270,17 @@ export class Engine {
         recentFiles: existingData?.recentFiles || { audioFiles: [], backgroundVideoFiles: [] }
       };
       
+      console.log(`[Engine] ===== 自動保存実行 =====`);
+      console.log(`[Engine] audioInfo保存内容:`, autoSaveData.engineState.audioInfo);
+      console.log(`[Engine] 現在のaudioFileName: "${this.audioFileName}"`);
+      console.log(`[Engine] 現在のaudioFilePath: "${this.audioFilePath}"`);
+      console.log(`[Engine] 引数audioFilePath: "${audioFilePath}"`);
+      console.log(`[Engine] ファイルパス一致確認: Engine=${this.audioFilePath === audioFilePath}, 引数使用=${this.audioFilePath || audioFilePath}`);
+      
       const success = await persistenceService.saveAutoSave(autoSaveData);
       if (success) {
         this.lastAutoSaveTime = Date.now();
+        console.log(`[Engine] 自動保存成功`);
       } else {
         console.warn('Engine: 自動保存に失敗しました（ディレクトリが存在しない可能性があります）');
       }
@@ -3168,6 +3364,10 @@ export class Engine {
           // 音楽・背景動画ファイルの復元処理も改善版に変更
           if (hasAudio && autoSaveData.engineState.audioInfo) {
             const audioInfo = autoSaveData.engineState.audioInfo;
+            console.log(`[Engine] ===== 音楽ファイル復元開始 =====`);
+            console.log(`[Engine] 復元対象audioInfo:`, audioInfo);
+            console.log(`[Engine] fileName: "${audioInfo.fileName}"`);
+            console.log(`[Engine] filePath: "${audioInfo.filePath}"`);
             await this.requestAudioFileRestoreWithPath(audioInfo.fileName, audioInfo.filePath);
           }
           
@@ -3296,7 +3496,9 @@ export class Engine {
       
       if (result) {
         // 背景動画として設定（Electron用メソッド）
-        this.setBackgroundVideoElement(result.video, 'cover', result.fileName);
+        // 保存されているループ設定を取得
+        const storedLoop = this.backgroundConfig?.videoLoop || false;
+        this.setBackgroundVideoElement(result.video, 'cover', result.fileName, storedLoop);
       } else {
       }
     } catch (error) {

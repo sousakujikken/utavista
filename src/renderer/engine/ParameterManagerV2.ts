@@ -1,6 +1,7 @@
 import { StandardParameters, DEFAULT_PARAMETERS } from '../../types/StandardParameters';
 import { ParameterValidator } from '../../utils/ParameterValidator';
 import { templateRegistry } from '../templates/registry/templateRegistry';
+import { ParameterProcessor } from '../utils/ParameterProcessor';
 
 // 完全なパラメータセット（すべて必須）
 export type CompleteParameters = Required<StandardParameters>;
@@ -262,6 +263,17 @@ export class ParameterManagerV2 {
     if (import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
     }
     
+    // フレーズパラメータ変更時の自動個別設定有効化
+    const isCurrentlyIndividual = this.phraseIndividualSettings.get(phraseId) || false;
+    
+    if (!isCurrentlyIndividual) {
+      console.log(`[ParameterManagerV2] Auto-enabling individual setting for phrase: ${phraseId}`);
+      this.phraseIndividualSettings.set(phraseId, true);
+      
+      // 個別設定有効化の通知
+      this.notifyIndividualSettingChange(phraseId, true);
+    }
+    
     // 変更を通知
     this.notifyParameterChange(phraseId, params);
   }
@@ -317,21 +329,19 @@ export class ParameterManagerV2 {
    * グローバルデフォルトの更新（統一的処理）
    */
   updateGlobalDefaults(updates: Partial<StandardParameters>): void {
-    // 配列チェック（防御的プログラミング）
-    if (Array.isArray(updates)) {
-      console.error('ParameterManagerV2: updateGlobalDefaults に配列が渡されました。これは通常起こるべきではありません。');
-      console.error('ParameterManagerV2: Stack trace:', new Error().stack);
-      
-      // パラメータ設定配列の場合は変換を試みる
-      if (ParameterValidator.isParameterConfigArray(updates)) {
-        updates = ParameterValidator.convertConfigToParams(updates) as Partial<StandardParameters>;
-      } else {
-        console.error('ParameterManagerV2: Skipping invalid update');
-        return;
-      }
-    }
+    // デバッグ: 実際に何が渡されているかを確認
+    // console.log('[ParameterManagerV2] updateGlobalDefaults called with:', {
+    //   type: Array.isArray(updates) ? 'Array' : typeof updates,
+    //   length: Array.isArray(updates) ? updates.length : 'N/A',
+    //   keys: Array.isArray(updates) ? 'Array indices' : Object.keys(updates as any).slice(0, 5),
+    //   firstItem: Array.isArray(updates) ? updates[0] : 'N/A',
+    //   stackTrace: new Error().stack?.split('\n').slice(1, 4)
+    // });
     
-    const validation = ParameterValidator.validate(updates);
+    // 型安全な正規化（配列が来ることは設計上あり得ない）
+    const normalizedUpdates = ParameterProcessor.validateParameterObject(updates as Record<string, any>);
+    
+    const validation = ParameterValidator.validate(normalizedUpdates);
     if (!validation.isValid) {
       console.warn('Global defaults validation errors:', validation.errors);
       // 検証エラーがあっても、有効な値は適用する
@@ -339,7 +349,7 @@ export class ParameterManagerV2 {
     
     // 全てのパラメータを統一的に扱う（特別扱いなし）
     const validUpdates: Partial<StandardParameters> = {};
-    for (const [key, value] of Object.entries(updates)) {
+    for (const [key, value] of Object.entries(normalizedUpdates)) {
       // 明示的にundefinedでない限り、すべての値を適用（空文字も含む）
       if (value !== undefined) {
         validUpdates[key as keyof StandardParameters] = value;
@@ -347,11 +357,11 @@ export class ParameterManagerV2 {
     }
     
     if (Object.keys(validUpdates).length > 0) {
-      Object.assign(this.globalDefaults, validUpdates);
+      // 安全なオブジェクトマージ
+      this.globalDefaults = ParameterProcessor.mergeParameterObjects(this.globalDefaults, validUpdates) as CompleteParameters;
       
       // 個別設定がないフレーズのパラメータを更新
       this.propagateGlobalChangesToNormalPhrases(validUpdates);
-    } else {
     }
   }
   
@@ -518,8 +528,12 @@ export class ParameterManagerV2 {
    */
   importCompressed(data: CompressedProjectData): void {
     
-    // グローバルデフォルトを設定
-    this.globalDefaults = { ...this.createDefaultParameters(), ...data.globalDefaults };
+    // グローバルデフォルトを安全に設定
+    const normalizedGlobalDefaults = ParameterProcessor.normalizeToParameterObject(data.globalDefaults);
+    this.globalDefaults = ParameterProcessor.mergeParameterObjects(
+      this.createDefaultParameters(), 
+      normalizedGlobalDefaults
+    ) as CompleteParameters;
     
     // 各フレーズを復元
     this.phraseParameters.clear();

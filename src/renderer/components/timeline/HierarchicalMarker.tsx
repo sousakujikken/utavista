@@ -341,9 +341,18 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
   const showLeftHandle = !multiSelected || isLeftOuterMarker;
   const showRightHandle = !multiSelected || isRightOuterMarker;
 
+  // デバッグ用: マーカー状態をログ出力（activated変更時のみ）
+  useEffect(() => {
+    if (level === 'phrase' && isActivated) {
+      console.log(`[HierarchicalMarker] Phrase ${unit.id}: activated`);
+    }
+  }, [isActivated, unit.id, level]);
+
+  const className = `hierarchical-marker ${level}-marker ${isSelected ? 'selected' : ''} ${multiSelected ? 'multi-selected' : ''} ${isActivated ? 'activated' : ''}`;
+
   return (
     <div 
-      className={`hierarchical-marker ${level}-marker ${isSelected ? 'selected' : ''} ${multiSelected ? 'multi-selected' : ''} ${isActivated ? 'activated' : ''}`}
+      className={className}
       style={{
         position: 'absolute',
         left: `${startX}px`,

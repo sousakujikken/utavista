@@ -93,7 +93,13 @@
 
 /* モード切り替えスイッチのスタイル */
 .editor-mode-switch {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: var(--bg-primary);
   margin-bottom: var(--space-lg);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .switch-container {
@@ -409,8 +415,11 @@
   box-shadow: 0 0 15px rgba(34, 139, 34, 0.2);
 }
 
-/* 個別設定スイッチセクション */
-.individual-setting-switch-section {
+/* 個別設定状態表示セクション */
+.individual-setting-status-section {
+  position: sticky;
+  top: 70px; /* editor-mode-switchの下に配置 */
+  z-index: 9;
   background-color: rgba(34, 139, 34, 0.1);
   border: 1px solid rgba(34, 139, 34, 0.3);
   border-radius: 8px;

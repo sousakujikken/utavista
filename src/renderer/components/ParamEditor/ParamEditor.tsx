@@ -12,7 +12,7 @@ export interface ParamConfig {
   max?: number;
   step?: number;
   label?: string;
-  options?: Array<{ value: any, label: string }>;
+  options?: string[] | Array<{ value: any, label: string }> | (() => string[]);
 }
 
 interface ParamEditorProps {
@@ -139,11 +139,31 @@ const ParamEditor: React.FC<ParamEditorProps> = ({
                     onChange={(e) => handleChange(param.name, e.target.value)}
                     disabled={disabled}
                   >
-                    {param.options.map(option => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
+                    {(() => {
+                      // optionsが関数の場合は実行する
+                      const options = typeof param.options === 'function' ? param.options() : param.options;
+                      
+                      if (Array.isArray(options)) {
+                        // 最初の要素で配列の形式を判定
+                        if (options.length > 0 && typeof options[0] === 'object' && options[0] !== null) {
+                          // オブジェクト配列の場合 { value: any, label: string }
+                          return options.map((option: { value: any, label: string }) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ));
+                        } else {
+                          // 文字列配列の場合
+                          return options.map((option: string) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ));
+                        }
+                      }
+                      console.warn(`[ParamEditor] No valid options found for ${param.name}`, options);
+                      return null;
+                    })()}
                   </select>
                 </div>
               )}

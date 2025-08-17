@@ -22,6 +22,7 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
   const [musicFileName, setMusicFileName] = useState<string | null>(null);
   const [musicError, setMusicError] = useState<string | null>(null);
   const [recentFiles, setRecentFiles] = useState<Array<{fileName: string, filePath: string, timestamp: number}>>([]);
+  const [audioOffset, setAudioOffset] = useState<number>(0); // 音楽オフセット（ms）
 
   // 背景関連の状態
   const [backgroundColor, setBackgroundColor] = useState<string>('#000000');
@@ -30,6 +31,7 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
   const [backgroundVideoUrl, setBackgroundVideoUrl] = useState<string>('');
   const [fitMode, setFitMode] = useState<BackgroundFitMode>('cover');
   const [opacity, setOpacity] = useState<number>(1);
+  const [videoLoop, setVideoLoop] = useState<boolean>(false);
   const [recentVideoFiles, setRecentVideoFiles] = useState<Array<{fileName: string, filePath: string, timestamp: number}>>([]);
   const [recentImageFiles, setRecentImageFiles] = useState<Array<{fileName: string, filePath: string, timestamp: number}>>([]);
   const [currentAspectRatio, setCurrentAspectRatio] = useState<AspectRatio>('16:9');
@@ -195,6 +197,17 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
     }
   };
 
+  // 音楽オフセット更新処理
+  const handleAudioOffsetChange = (newOffset: number) => {
+    setAudioOffset(newOffset);
+    if (engine && engine.projectStateManager) {
+      // プロジェクト状態を更新
+      const currentState = engine.projectStateManager.getCurrentState();
+      currentState.audioOffset = newOffset;
+      engine.projectStateManager.saveCurrentState('音楽オフセット調整');
+    }
+  };
+
   // 音楽ファイル読み込み処理
   const handleMusicLoad = async () => {
     try {
@@ -215,11 +228,14 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
           const audioLoadEvent = new CustomEvent('music-file-loaded', {
             detail: { 
               url: actualFileURL || 'electron://loaded',
+              filePath: actualFileURL,
               fileName,
-              timestamp: Date.now()
+              timestamp: Date.now(),
+              source: 'ContentTab-NewFile'
             }
           });
           window.dispatchEvent(audioLoadEvent);
+          console.log('[ContentTab] 新規音楽ファイル読み込み完了イベント発火:', fileName);
         }, 50);
       }
     } catch (error) {
@@ -246,6 +262,7 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
     videoFilePath: string;
     fitMode: BackgroundFitMode;
     opacity: number;
+    videoLoop: boolean;
   }>) => {
     if (engine) {
       engine.updateBackgroundConfig(updates);
@@ -273,6 +290,9 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
       if (currentConfig.opacity !== undefined) {
         setOpacity(currentConfig.opacity);
       }
+      if (currentConfig.videoLoop !== undefined) {
+        setVideoLoop(currentConfig.videoLoop);
+      }
       
       const stageConfig = engine.getStageConfig();
       setCurrentAspectRatio(stageConfig.aspectRatio);
@@ -298,6 +318,12 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
           if (config.videoFilePath) setBackgroundVideoUrl(config.videoFilePath);
           if (config.fitMode) setFitMode(config.fitMode);
           if (config.opacity !== undefined) setOpacity(config.opacity);
+          if (config.videoLoop !== undefined) setVideoLoop(config.videoLoop);
+        }
+        
+        // 音楽オフセット値を読み込み
+        if (currentState.audioOffset !== undefined) {
+          setAudioOffset(currentState.audioOffset);
         }
       }
 
@@ -417,12 +443,37 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
                       const { audio, fileName } = result;
                       engine.loadAudioElement(audio, fileName);
                       setMusicFileName(fileName);
+                      
+                      // 最近使用したファイルリストを更新
+                      setTimeout(async () => {
+                        const updatedFiles = await electronMediaManager.getRecentFiles('audio');
+                        setRecentFiles(updatedFiles);
+                      }, 100);
+                      
+                      // 音楽読み込み完了イベントを発火（WaveformPanel向け）
+                      setTimeout(() => {
+                        const actualFileURL = electronMediaManager.getCurrentAudioFilePath();
+                        const audioLoadEvent = new CustomEvent('music-file-loaded', {
+                          detail: { 
+                            url: actualFileURL || 'electron://loaded',
+                            filePath: selectedFile.filePath,
+                            fileName,
+                            timestamp: Date.now(),
+                            source: 'ContentTab-RecentFiles'
+                          }
+                        });
+                        window.dispatchEvent(audioLoadEvent);
+                        console.log('[ContentTab] 最近使用したファイル読み込み完了イベント発火:', fileName);
+                      }, 50);
                     }
                   } catch (error) {
                     setMusicError('ファイルの読み込みに失敗しました');
                   }
                 }
               }
+              
+              // セレクトボックスをリセット
+              e.target.value = '';
             }}
           >
             <option value="">選択してください</option>
@@ -447,6 +498,41 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
             onClose={() => setMusicError(null)}
           />
         )}
+
+        {/* 音楽タイミングオフセット調整 */}
+        <div className="u-mt-md">
+          <label className="u-text-secondary u-mb-xs">
+            音楽タイミングオフセット: {audioOffset}ms
+            <span className="u-text-small u-text-muted u-ml-xs">
+              (±200ms範囲で微調整)
+            </span>
+          </label>
+          <input
+            type="range"
+            min="-500"
+            max="500"
+            step="10"
+            value={audioOffset}
+            onChange={(e) => handleAudioOffsetChange(Number(e.target.value))}
+            className="slider u-w-full"
+          />
+          <div className="u-flex u-justify-between u-text-small u-text-muted u-mt-xs">
+            <span>-500ms (早める)</span>
+            <span>0ms</span>
+            <span>+500ms (遅らせる)</span>
+          </div>
+          {audioOffset !== 0 && (
+            <div className="u-mt-xs">
+              <button
+                onClick={() => handleAudioOffsetChange(0)}
+                className="u-text-small u-text-primary u-cursor-pointer u-bg-transparent u-border-none"
+                style={{ textDecoration: 'underline' }}
+              >
+                リセット (0ms)
+              </button>
+            </div>
+          )}
+        </div>
       </Section>
 
       <hr className="u-divider" />
@@ -545,8 +631,8 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
                     setBackgroundVideoUrl(video.src);
                     setBackgroundType('video');
                     video.muted = true;
-                    engine.setBackgroundVideoElement(video, fitMode, fileName);
-                    updateBackgroundConfig({ type: 'video', videoFilePath: video.src });
+                    engine.setBackgroundVideoElement(video, fitMode, fileName, videoLoop);
+                    updateBackgroundConfig({ type: 'video', videoFilePath: video.src, videoLoop });
                     
                     setTimeout(async () => {
                       const updatedFiles = await electronMediaManager.getRecentFiles('backgroundVideo');
@@ -579,8 +665,8 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
                           setBackgroundVideoUrl(video.src);
                           setBackgroundType('video');
                           video.muted = true;
-                          engine.setBackgroundVideoElement(video, fitMode, fileName);
-                          updateBackgroundConfig({ type: 'video', videoFilePath: video.src });
+                          engine.setBackgroundVideoElement(video, fitMode, fileName, videoLoop);
+                          updateBackgroundConfig({ type: 'video', videoFilePath: video.src, videoLoop });
                         } else {
                           console.error('最近使用ファイルの動画読み込みに失敗');
                         }
@@ -605,6 +691,29 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
                 選択中: {backgroundVideoUrl.split('/').pop()}
               </div>
             )}
+
+            <div className="u-mt-md">
+              <label className="u-flex u-align-center u-gap-xs">
+                <input
+                  type="checkbox"
+                  checked={videoLoop}
+                  onChange={(e) => {
+                    const newVideoLoop = e.target.checked;
+                    setVideoLoop(newVideoLoop);
+                    updateBackgroundConfig({ videoLoop: newVideoLoop });
+                    
+                    // 既に読み込まれている動画がある場合は即座に設定を適用
+                    if (engine && backgroundVideoUrl) {
+                      const currentVideo = engine.getBackgroundVideo();
+                      if (currentVideo) {
+                        currentVideo.loop = newVideoLoop;
+                      }
+                    }
+                  }}
+                />
+                <span className="u-text-secondary">自動ループ再生（短い動画用）</span>
+              </label>
+            </div>
           </div>
         )}
 

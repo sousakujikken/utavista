@@ -1,0 +1,186 @@
+{
+  "sessionId": "validation-1754354576856",
+  "timestamp": "2025-08-05T00:42:57.230Z",
+  "config": {
+    "templateDir": "/Users/hirocat/Library/Mobile Documents/com~apple~CloudDocs/development/visiblyrics/src/renderer/templates",
+    "skipRuntimeTests": false,
+    "generateDetailedReport": true,
+    "validateTypes": true,
+    "checkMemoryLeaks": true
+  },
+  "results": {
+    "totalTemplates": 10,
+    "validTemplates": 10,
+    "invalidTemplates": 0,
+    "results": [
+      {
+        "templateId": "BlurFadeTemplate",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "FlickerFadeTemplate",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "GlitchText",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "Legacy animate method detected - consider migrating to hierarchical render methods",
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "MultiLineStackTemplate",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "MultiLineText",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "PhraseBlurFadeTemplate",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "WordSlideText",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "WordSlideText2",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "WordSlideTextLLM",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      },
+      {
+        "templateId": "WordSlideTextPrimitive",
+        "isValid": true,
+        "errors": [],
+        "warnings": [
+          "PIXI environment not available - skipping runtime tests"
+        ],
+        "details": {
+          "isClass": true,
+          "canInstantiate": true,
+          "hasRenderMethods": true,
+          "hasParameterConfig": true,
+          "runtimeTest": true
+        }
+      }
+    ],
+    "overallValid": true
+  },
+  "performanceMetrics": {
+    "totalTime": 374,
+    "templatesPerSecond": 26.737967914438503,
+    "memoryUsage": {
+      "rss": 128090112,
+      "heapTotal": 34144256,
+      "heapUsed": 20615592,
+      "external": 2545799,
+      "arrayBuffers": 100546
+    }
+  },
+  "compilerResults": {
+    "success": true,
+    "errors": [],
+    "warnings": []
+  }
+}

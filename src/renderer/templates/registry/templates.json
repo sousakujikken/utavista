@@ -1,28 +1,34 @@
 {
   "templates": [
     {
-      "id": "wordslidetext",
-      "name": "単語スライドテキスト",
-      "importPath": "./WordSlideText",
-      "exportName": "WordSlideText"
+      "id": "glitchtextprimitive",
+      "name": "グリッチテキスト プリミティブ完全版",
+      "importPath": "./GlitchTextPrimitive",
+      "exportName": "GlitchTextPrimitive"
     },
     {
-      "id": "flickerfadetemplate",
-      "name": "点滅フェードテキスト",
-      "importPath": "./FlickerFadeTemplate",
-      "exportName": "FlickerFadeTemplate"
+      "id": "fadeblurandomprimitive",
+      "name": "フェード＋ブラー＋ランダム配置テキスト",
+      "importPath": "./FadeBlurRandomTextPrimitive",
+      "exportName": "FadeBlurRandomTextPrimitive"
     },
     {
-      "id": "glitchtext",
-      "name": "グリッチテキスト",
-      "importPath": "./GlitchText",
-      "exportName": "GlitchText"
+      "id": "blinkfadetextprimitive_v2",
+      "name": "点滅フェードテキスト v2.0",
+      "importPath": "./BlinkFadeTextPrimitive_v2",
+      "exportName": "BlinkFadeTextPrimitive_v2"
     },
     {
-      "id": "wordslidetext2",
-      "name": "単語スライドテキスト2",
-      "importPath": "./WordSlideText2",
-      "exportName": "WordSlideText2"
+      "id": "pureprimitivewordslidetext",
+      "name": "完全プリミティブベース単語スライドテキスト",
+      "importPath": "./PurePrimitiveWordSlideText",
+      "exportName": "PurePrimitiveWordSlideText"
+    },
+    {
+      "id": "verticaltexttemplate",
+      "name": "縦書きテキストテンプレート",
+      "importPath": "./VerticalTextTemplate",
+      "exportName": "VerticalTextTemplate"
     }
   ]
 }

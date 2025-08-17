@@ -286,7 +286,7 @@ const WaveformPanel: React.FC<WaveformPanelProps> = ({
   useEffect(() => {
     // 音楽ファイル読み込みイベントのリスナー（MusicPanelからの即座のイベント）
     const handleMusicFileLoaded = (event: CustomEvent) => {
-      // 音楽ファイル読み込みイベントログ削除済み
+      console.log('[WaveformPanel] 音楽ファイル変更イベントを受信:', event.detail);
       
       // filePathまたはurlプロパティから音楽ファイルパスを取得
       const musicFilePath = event.detail.filePath || event.detail.url;
@@ -294,12 +294,53 @@ const WaveformPanel: React.FC<WaveformPanelProps> = ({
       if (musicFilePath) {
         // ElectronでWaveSurferが動作するよう、file://プロトコルを付与してエンコード
         const fileUrl = 'file://' + encodeURI(musicFilePath.replace(/\\/g, '/'));
-        // ファイルURL処理ログ削除済み
+        console.log('[WaveformPanel] 新しい音楽ファイルURL:', fileUrl);
+        
+        // 既存のWaveSurferインスタンスを即座に破棄
+        if (wavesurferRef.current) {
+          console.log('[WaveformPanel] 既存のWaveSurferインスタンスを破棄中...');
+          try {
+            wavesurferRef.current.destroy();
+          } catch (error) {
+            console.warn('[WaveformPanel] WaveSurfer破棄時のエラー:', error);
+          }
+          wavesurferRef.current = null;
+        }
+        
+        // 音量分析のクリーンアップ
+        if (volumeAnimationFrameRef.current) {
+          cancelAnimationFrame(volumeAnimationFrameRef.current);
+          volumeAnimationFrameRef.current = undefined;
+        }
+        if (audioContextRef.current) {
+          try {
+            audioContextRef.current.close();
+          } catch (error) {
+            console.warn('[WaveformPanel] AudioContext破棄時のエラー:', error);
+          }
+          audioContextRef.current = null;
+        }
+        setCurrentVolume(0);
+        setVolumeHistory([]);
+        setIsReady(false);
+        
+        // 新しいURLを直接設定してforceRefreshで強制更新
         setAudioUrl(fileUrl);
-        setIsReady(false); // 新しいファイル読み込み時にリセット
-        setForceRefresh(prev => prev + 1); // 強制的に再レンダリングをトリガー
+        setForceRefresh(prev => prev + 1);
+        console.log('[WaveformPanel] 波形初期化トリガー完了');
       } else {
         console.warn('WaveformPanel: No filePath or url in music-file-loaded event', event.detail);
+        // ファイルパスがない場合は波形をクリア
+        if (wavesurferRef.current) {
+          try {
+            wavesurferRef.current.destroy();
+          } catch (error) {
+            console.warn('[WaveformPanel] WaveSurfer破棄時のエラー:', error);
+          }
+          wavesurferRef.current = null;
+        }
+        setAudioUrl('');
+        setIsReady(false);
       }
     };
   
@@ -313,21 +354,32 @@ const WaveformPanel: React.FC<WaveformPanelProps> = ({
 
   // WaveSurferの初期化
   useEffect(() => {
-    // WaveSurfer初期化ログ削除済み
+    console.log('[WaveformPanel] WaveSurfer初期化useEffect実行:', {
+      audioUrl,
+      forceRefresh,
+      hasWaveformRef: !!waveformRef.current,
+      hasExistingWaveSurfer: !!wavesurferRef.current
+    });
     
     if (!waveformRef.current || !audioUrl) {
+      console.log('[WaveformPanel] WaveSurfer初期化スキップ - 条件不足:', {
+        hasWaveformRef: !!waveformRef.current,
+        audioUrl: audioUrl
+      });
       setIsReady(false);
       return;
     }
     
     // 既存のインスタンスがあれば破棄
     if (wavesurferRef.current) {
+      console.log('[WaveformPanel] 既存のWaveSurferインスタンスを破棄');
       wavesurferRef.current.destroy();
       wavesurferRef.current = null;
       setIsReady(false);
     }
     
     // WaveSurferインスタンスの作成
+    console.log('[WaveformPanel] 新しいWaveSurferインスタンスを作成開始:', audioUrl);
     try {
       const wavesurfer = WaveSurfer.create({
         container: waveformRef.current,
@@ -349,10 +401,12 @@ const WaveformPanel: React.FC<WaveformPanelProps> = ({
       });
       
       // 音声ファイル読み込み
+      console.log('[WaveformPanel] WaveSurferに音声ファイルを読み込み:', audioUrl);
       wavesurfer.load(audioUrl);
       
       // イベントリスナー
       wavesurfer.on('ready', () => {
+        console.log('[WaveformPanel] WaveSurfer読み込み完了');
         
         // WaveSurferが勝手に再生しないよう確実に停止
         if (wavesurfer.isPlaying()) {

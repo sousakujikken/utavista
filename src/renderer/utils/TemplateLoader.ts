@@ -51,8 +51,8 @@ export function getTemplateByName(name: string): IAnimationTemplate | null {
  * デフォルトのテンプレートを取得
  */
 export function getDefaultTemplate(): IAnimationTemplate {
-  // デフォルトとしてHierarchicalOriginMarkerを使用
-  return AllTemplates.HierarchicalOriginMarker;
+  // プリミティブシステムのCompleteWordSlideTemplateを使用
+  return AllTemplates.CompleteWordSlideTemplate;
 }
 
 export default {

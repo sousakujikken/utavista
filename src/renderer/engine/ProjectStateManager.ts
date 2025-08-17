@@ -16,6 +16,7 @@ export interface ProjectState {
   // 音楽ファイル情報
   audioFileName?: string;
   audioFileDuration?: number;
+  audioOffset?: number; // 音楽再生タイミングオフセット（ms）、デフォルトは0
   // 個別設定情報
   individualSettingsEnabled?: string[]; // 個別設定が有効化されたオブジェクトID
 }
