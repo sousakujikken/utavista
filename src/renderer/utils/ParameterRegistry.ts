@@ -265,6 +265,8 @@ export class ParameterRegistry {
       description: 'シャドウ精細度（高いほど高品質・重い）'
     });
     
+    // === スパークルエフェクトパラメータ ===
+
     // === その他 ===
     this.registerParameter({
       name: 'blendMode',
@@ -520,120 +522,6 @@ export class ParameterRegistry {
    * テンプレート固有パラメータの初期化
    */
   private initializeTemplateParameters(): void {
-    
-    // === WordSlideText/WordSlideText2共通パラメータ ===
-    this.registerParameter({
-      name: 'headTime',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.headTime || 500,
-      min: 0,
-      max: 2000,
-      description: 'スライドイン時間(ms)'
-    });
-    
-    this.registerParameter({
-      name: 'tailTime',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.tailTime || 500,
-      min: 0,
-      max: 2000,
-      description: 'フェードアウト時間(ms)'
-    });
-    
-    this.registerParameter({
-      name: 'entranceInitialSpeed',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.entranceInitialSpeed || 4.0,
-      min: 0.1,
-      max: 20.0,
-      description: '開始速度(px/ms)'
-    });
-    
-    this.registerParameter({
-      name: 'activeSpeed',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.activeSpeed || 0.10,
-      min: 0.01,
-      max: 2.0,
-      description: '終了速度(px/ms)'
-    });
-    
-    this.registerParameter({
-      name: 'rightOffset',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.rightOffset || 100,
-      min: 0,
-      max: 500,
-      description: '右側初期位置(px)'
-    });
-    
-    // === ランダム配置パラメータ ===
-    this.registerParameter({
-      name: 'randomPlacement',
-      type: 'boolean',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.randomPlacement ?? true,
-      description: 'ランダム配置有効'
-    });
-    
-    this.registerParameter({
-      name: 'randomSeed',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.randomSeed || 0,
-      min: 0,
-      max: 9999,
-      description: 'ランダムシード値'
-    });
-    
-    this.registerParameter({
-      name: 'randomRangeX',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.randomRangeX || 200,
-      min: 0,
-      max: 800,
-      description: 'ランダム範囲X(px)'
-    });
-    
-    this.registerParameter({
-      name: 'randomRangeY',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.randomRangeY || 150,
-      min: 0,
-      max: 600,
-      description: 'ランダム範囲Y(px)'
-    });
-    
-    this.registerParameter({
-      name: 'minDistanceFromPrevious',
-      type: 'number',
-      category: 'template-specific',
-      templateId: 'wordslidetext',
-      defaultValue: DEFAULT_PARAMETERS.minDistanceFromPrevious || 20,
-      min: 0,
-      max: 500,
-      description: '最小間隔(px)'
-    });
-    
-    
-    
-    
     
     // === FadeBlurRandomTextPrimitive固有パラメータ ===
     this.registerParameter({
@@ -990,6 +878,270 @@ export class ParameterRegistry {
       min: 0.5,
       max: 1,
       description: '完全表示閾値'
+    });
+    
+    // === SparkleEffect パラメータ ===
+    this.registerParameter({
+      name: 'enableSparkle',
+      type: 'boolean',
+      category: 'standard',
+      defaultValue: true,
+      description: 'キラキラエフェクトの有効/無効'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleCount',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 4,
+      min: 1,
+      max: 20,
+      description: '同時生成パーティクル数'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleSize',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 20,
+      min: 4,
+      max: 30,
+      description: 'パーティクルサイズ(px)'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleColor',
+      type: 'string',
+      category: 'standard',
+      defaultValue: '#FFD700',
+      description: 'パーティクルカラー'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleStarSpikes',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 5,
+      min: 3,
+      max: 12,
+      description: '星型の角数（4角星、5角星、6角星、8角星など）'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleScale',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 3.0,
+      min: 0.5,
+      max: 10.0,
+      description: 'スケール倍率'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleDuration',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 1000,
+      min: 500,
+      max: 3000,
+      description: 'パーティクル寿命(ms)'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleRadius',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 30,
+      min: 5,
+      max: 100,
+      description: '散布半径(px)'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleAnimationSpeed',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 1.0,
+      min: 0.1,
+      max: 3.0,
+      description: 'アニメーション速度'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleAlphaDecay',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 0.98,
+      min: 0.9,
+      max: 0.99,
+      description: '透明度減衰率'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleRotationSpeed',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 0.3,
+      min: 0.0,
+      max: 2.0,
+      description: 'パーティクル回転速度'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleGenerationRate',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 2.0,
+      min: 0.5,
+      max: 10.0,
+      description: '1秒間のパーティクル生成数（ベース値）'
+    });
+    
+    this.registerParameter({
+      name: 'sparkleVelocityCoefficient',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 1.0,
+      min: 0.0,
+      max: 3.0,
+      description: '移動速度依存の出現頻度係数のn乗（0=速度無依存、1=線形、2=二次、3=三次）'
+    });
+
+    // === パーティクルグローエフェクトパラメータ ===
+    this.registerParameter({
+      name: 'enableParticleGlow',
+      type: 'boolean',
+      category: 'standard',
+      defaultValue: false,
+      description: 'パーティクルグロー効果の有効化'
+    });
+
+    this.registerParameter({
+      name: 'particleGlowStrength',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 1.2,
+      min: 0.1,
+      max: 5.0,
+      description: 'パーティクルグロー強度'
+    });
+
+    this.registerParameter({
+      name: 'particleGlowBrightness',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 1.1,
+      min: 0.5,
+      max: 3.0,
+      description: 'パーティクルグロー明度'
+    });
+
+    this.registerParameter({
+      name: 'particleGlowBlur',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 4,
+      min: 1,
+      max: 20,
+      description: 'パーティクルグローブラー量'
+    });
+
+    this.registerParameter({
+      name: 'particleGlowQuality',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 6,
+      min: 2,
+      max: 32,
+      description: 'パーティクルグロー品質'
+    });
+
+    this.registerParameter({
+      name: 'particleGlowThreshold',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 0.1,
+      min: 0.0,
+      max: 1.0,
+      description: 'パーティクルグロー閾値'
+    });
+
+    // === パーティクル瞬きエフェクトパラメータ ===
+    this.registerParameter({
+      name: 'enableTwinkle',
+      type: 'boolean',
+      category: 'standard',
+      defaultValue: true,
+      description: 'パーティクル瞬き機能の有効/無効'
+    });
+
+    this.registerParameter({
+      name: 'twinkleFrequency',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 0.5,
+      min: 0.1,
+      max: 5.0,
+      description: '瞬きの頻度（回/秒）'
+    });
+
+    this.registerParameter({
+      name: 'twinkleBrightness',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 2.5,
+      min: 1.0,
+      max: 10.0,
+      description: '瞬き時の明度倍率'
+    });
+
+    this.registerParameter({
+      name: 'twinkleDuration',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 100,
+      min: 50,
+      max: 500,
+      description: '瞬きの持続時間（ms）'
+    });
+
+    this.registerParameter({
+      name: 'twinkleProbability',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 0.8,
+      min: 0.0,
+      max: 1.0,
+      description: '瞬きの確率（0-1）'
+    });
+
+    // === パーティクルサイズ縮小エフェクトパラメータ ===
+    this.registerParameter({
+      name: 'enableSizeShrink',
+      type: 'boolean',
+      category: 'standard',
+      defaultValue: false,
+      description: 'パーティクルサイズ縮小機能の有効/無効'
+    });
+
+    this.registerParameter({
+      name: 'sizeShrinkRate',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 1.0,
+      min: 0.0,
+      max: 3.0,
+      description: 'サイズ縮小速度の指数（0乗=一定、1乗=線形、2乗=二次、3乗=三次）'
+    });
+
+    this.registerParameter({
+      name: 'sizeShrinkRandomRange',
+      type: 'number',
+      category: 'standard',
+      defaultValue: 0.0,
+      min: 0.0,
+      max: 1.0,
+      description: '縮小速度のランダム範囲（0%から100%）'
     });
   }
   

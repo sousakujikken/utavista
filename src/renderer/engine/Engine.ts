@@ -18,7 +18,9 @@ import { StandardParameters } from '../types/StandardParameters';
 import { ParameterValidator } from '../utils/ParameterValidator';
 import { ParameterRegistry } from '../utils/ParameterRegistry';
 import { UnifiedRestoreManager } from './UnifiedRestoreManager';
+import { SparkleEffectPrimitive } from '../primitives/effects/SparkleEffectPrimitive';
 import { ProjectFileData, AutoSaveData } from '../../types/UnifiedProjectData';
+import { OptimizedParameterUpdater } from './OptimizedParameterUpdater';
 
 export class Engine {
   // パラメータカテゴリ分類
@@ -76,6 +78,7 @@ export class Engine {
   
   // 統一復元マネージャー
   private unifiedRestoreManager: UnifiedRestoreManager;
+  private optimizedUpdater: OptimizedParameterUpdater;
   
   // ステージ設定
   private stageConfig: StageConfig;
@@ -109,6 +112,11 @@ export class Engine {
     defaultParams: Partial<StandardParameters> = {},
     templateId: string = 'fadeslidetext'
   ) {
+    // グローバル参照を設定（パーティクルシステムなどから時刻取得用）
+    if (typeof window !== 'undefined') {
+      (window as any).engineInstance = this;
+    }
+    
     // テンプレートの保存
     this.template = template;
     
@@ -216,6 +224,9 @@ export class Engine {
       this.templateManager,
       this.instanceManager
     );
+    
+    // OptimizedParameterUpdaterの初期化
+    this.optimizedUpdater = new OptimizedParameterUpdater();
 
     // ステージの原点を明示的に設定 (左上を(0, 0)にする)
     this.app.stage.position.set(0, 0);
@@ -1193,6 +1204,11 @@ export class Engine {
   
   // グローバルパラメータを更新（Undo対応）
   updateGlobalParams(params: Partial<StandardParameters>, saveState: boolean = true) {
+    console.log('[Engine] updateGlobalParams (OLD METHOD) called - redirecting to updateGlobalParameters');
+    // 新しい最適化メソッドにリダイレクト
+    return this.updateGlobalParameters(params);
+    
+    /* 旧実装はコメントアウト
     try {
       if (import.meta.env.DEV && Math.random() < 0.1) { // 10%の確率でのみ出力
       }
@@ -1266,6 +1282,7 @@ export class Engine {
       console.error('Engine: updateGlobalParamsの処理中にエラーが発生しました', error);
       return false;
     }
+    */
   }
 
   // 選択されたオブジェクトの個別パラメータをクリア
@@ -1947,6 +1964,10 @@ export class Engine {
   // 現在時刻を設定するメソッド（動画出力用）
   setCurrentTime(timeMs: number): void {
     this.currentTime = timeMs;
+    // OptimizedParameterUpdaterの現在時刻も更新
+    if (this.optimizedUpdater) {
+      this.optimizedUpdater.setCurrentTime(timeMs);
+    }
     this.instanceManager.update(timeMs);
   }
 
@@ -2019,6 +2040,23 @@ export class Engine {
     
     // 現在の時刻で再描画
     this.instanceManager.update(this.currentTime);
+  }
+
+  /**
+   * パーティクル品質向上：解像度スケールファクターを設定
+   * @param scale 解像度スケールファクター
+   */
+  private setParticleResolutionScale(scale: number): void {
+    SparkleEffectPrimitive.setGlobalResolutionScale(scale);
+    console.log(`🎯 [PARTICLE_QUALITY] Set global particle resolution scale to: ${scale}`);
+  }
+
+  /**
+   * パーティクル解像度スケールをリセット（通常表示用）
+   */
+  private resetParticleResolutionScale(): void {
+    SparkleEffectPrimitive.resetGlobalResolutionScale();
+    console.log(`🎯 [PARTICLE_QUALITY] Reset particle resolution scale to 1.0`);
   }
   
   /**
@@ -2855,11 +2893,15 @@ export class Engine {
         // スケーリング計算（固定ベースサイズから出力サイズに合わせる）
         const scaleX = outputWidth / baseWidth;
         const scaleY = outputHeight / baseHeight;
+        const averageScale = (scaleX + scaleY) / 2; // 平均スケールを計算
         
         // 🔧 デバッグログ：サイズ比較
         const currentStageWidth = this.app.stage.width;
         const currentStageHeight = this.app.stage.height;
-        console.log(`🎯 [FIXED_SIZE_CAPTURE] Base: ${baseWidth}x${baseHeight}, Stage: ${currentStageWidth}x${currentStageHeight}, Output: ${outputWidth}x${outputHeight}, Scale: ${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
+        console.log(`🎯 [FIXED_SIZE_CAPTURE] Base: ${baseWidth}x${baseHeight}, Stage: ${currentStageWidth}x${currentStageHeight}, Output: ${outputWidth}x${outputHeight}, Scale: ${scaleX.toFixed(3)}x${scaleY.toFixed(3)}, AvgScale: ${averageScale.toFixed(3)}`);
+        
+        // パーティクル品質向上：解像度スケールファクターを設定
+        this.setParticleResolutionScale(averageScale);
         
         // 現在のスケールを保存
         const originalScaleX = this.app.stage.scale.x;
@@ -2880,6 +2922,9 @@ export class Engine {
         } finally {
           // スケーリングを元に戻す
           this.app.stage.scale.set(originalScaleX, originalScaleY);
+          
+          // パーティクル解像度スケールもリセット
+          this.resetParticleResolutionScale();
         }
         
       } finally {
@@ -3709,23 +3754,54 @@ export class Engine {
    * グローバルパラメータ更新（V2専用）
    */
   public updateGlobalParameters(params: Partial<StandardParameters>): void {
-    // V2モード: グローバルデフォルトを更新
-    this.parameterManager.updateGlobalDefaults(params);
+    console.log('[Engine] updateGlobalParameters called with params:', Object.keys(params));
     
-    // V2モード: 既存のすべてのフレーズにバッチ更新で変更を適用
-    const batchUpdates = this.phrases
+    // V2モード: グローバルデフォルトを更新（通知無効化）
+    this.parameterManager.updateGlobalDefaultsSilent(params);
+    
+    // 最適化されたパラメータ更新を使用
+    this.optimizedUpdater.setCurrentTime(this.currentTime);
+    console.log('[Engine] Current time set to:', this.currentTime);
+    
+    // 初期化済みフレーズのリストを作成
+    const phrasesToUpdate = this.phrases
       .filter(phrase => this.parameterManager.isPhraseInitialized(phrase.id))
-      .map(phrase => ({ phraseId: phrase.id, params }));
+      .map(phrase => ({
+        id: phrase.id,
+        startMs: phrase.start * 1000,  // 秒からミリ秒に変換
+        endMs: phrase.end * 1000        // 秒からミリ秒に変換
+      }));
     
-    if (batchUpdates.length > 0) {
-      this.parameterManager.updateParametersForMultiplePhrasesWithoutNotification(batchUpdates);
-      
-      // バッチ更新後に一度だけInstance更新を実行
-      if (this.instanceManager) {
-        this.instanceManager.updateExistingInstances();
-        this.instanceManager.update(this.currentTime);
+    console.log('[Engine] Phrases to update sample:', phrasesToUpdate.slice(0, 3));
+    
+    // 最適化された更新を実行
+    this.optimizedUpdater.updateGlobalParametersOptimized(
+      phrasesToUpdate,
+      params,
+      {
+        updatePhrase: (phraseId, updateParams) => {
+          this.parameterManager.updateParameters(phraseId, updateParams);
+        },
+        onSyncComplete: (visiblePhraseIds) => {
+          // 表示範囲の同期更新完了後、表示範囲内のインスタンスのみ更新
+          if (this.instanceManager) {
+            // 表示範囲内のフレーズのみ更新
+            this.instanceManager.updateExistingInstances(visiblePhraseIds);
+            this.instanceManager.update(this.currentTime);
+          }
+        },
+        onBatchComplete: (phraseIds) => {
+          // 非同期バッチ処理完了後、該当フレーズのインスタンスを更新
+          if (this.instanceManager) {
+            this.instanceManager.updateExistingInstances(phraseIds);
+          }
+        },
+        onAllComplete: () => {
+          // すべての非同期更新完了後の処理
+          console.log('Engine: すべてのパラメータ更新が完了しました');
+        }
       }
-    }
+    );
     
     // プロジェクト状態を更新
     const currentState = this.projectStateManager.getCurrentState();

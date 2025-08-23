@@ -361,13 +361,13 @@ export class SlideAnimationPrimitive implements AnimationPrimitive {
     let randomOffsetY = 0; // ランダムY位置を保持
     
     // デバッグログ：randomPlacementパラメータの値を確認
-    console.log(`[SlideAnimationPrimitive] calculatePhrasePosition called with:`, {
-      phraseId: params.phraseId,
-      randomPlacement: params.randomPlacement,
-      randomSeed: params.randomSeed,
-      randomRangeX: params.randomRangeX,
-      randomRangeY: params.randomRangeY
-    });
+    // console.log(`[SlideAnimationPrimitive] calculatePhrasePosition called with:`, {
+    //   phraseId: params.phraseId,
+    //   randomPlacement: params.randomPlacement,
+    //   randomSeed: params.randomSeed,
+    //   randomRangeX: params.randomRangeX,
+    //   randomRangeY: params.randomRangeY
+    // });
     
     if (params.randomPlacement) {
       const offsets = this.generateOffsetList(
@@ -395,9 +395,9 @@ export class SlideAnimationPrimitive implements AnimationPrimitive {
         randomOffsetY = offset.y; // Y位置を記録
         
         // 詳細デバッグログ出力（ハッシュ計算過程も含む）
-        console.log(`[SlideAnimationPrimitive] HASH_CALC: phraseId="${phraseId}" (length=${phraseId.length})`);
-        console.log(`[SlideAnimationPrimitive] HASH_RESULT: hash=${hash}, Math.abs(hash)=${Math.abs(hash)}, offsetIndex=${offsetIndex}/${offsets.length}`);
-        console.log(`[SlideAnimationPrimitive] OFFSET_SELECTED: offset[${offsetIndex}]=(${offset.x.toFixed(1)}, ${offset.y.toFixed(1)}), centerY=${centerY.toFixed(1)}`);
+        // console.log(`[SlideAnimationPrimitive] HASH_CALC: phraseId="${phraseId}" (length=${phraseId.length})`);
+        // console.log(`[SlideAnimationPrimitive] HASH_RESULT: hash=${hash}, Math.abs(hash)=${Math.abs(hash)}, offsetIndex=${offsetIndex}/${offsets.length})`);
+        // console.log(`[SlideAnimationPrimitive] OFFSET_SELECTED: offset[${offsetIndex}]=(${offset.x.toFixed(1)}, ${offset.y.toFixed(1)}), centerY=${centerY.toFixed(1)})`);
         
         // オフセット選択の履歴をグローバルに記録
         if (!(window as any).__OFFSET_INDEX_TRACKER__) {
@@ -409,12 +409,12 @@ export class SlideAnimationPrimitive implements AnimationPrimitive {
         // オフセット使用状況の定期報告
         if (tracker.size > 0 && tracker.size % 5 === 0) {
           const usage = Array.from(tracker.entries()).sort((a, b) => a[0] - b[0]);
-          console.log(`[SlideAnimationPrimitive] OFFSET_USAGE: ${usage.length}種類使用 [${usage.slice(0, 10).map(([idx, count]) => `${idx}:${count}`).join(', ')}...]`);
+          // console.log(`[SlideAnimationPrimitive] OFFSET_USAGE: ${usage.length}種類使用 [${usage.slice(0, 10).map(([idx, count]) => `${idx}:${count}`).join(', ')}...]`);
         }
       }
     } else {
       // randomPlacementがfalseの場合の警告
-      console.log(`[SlideAnimationPrimitive] Random placement is DISABLED for phrase "${params.phraseId}" (randomPlacement=${params.randomPlacement})`);
+      // console.log(`[SlideAnimationPrimitive] Random placement is DISABLED for phrase "${params.phraseId}" (randomPlacement=${params.randomPlacement})`);
     }
     
     // 各単語のスライドインタイミングに応じてフレーズY座標を動的に計算（オリジナル準拠）
@@ -455,10 +455,10 @@ export class SlideAnimationPrimitive implements AnimationPrimitive {
       centerY -= totalYOffset;
       
       // デバッグログ出力
-      console.log(`[SlideAnimationPrimitive] Dynamic Y offset applied: centerY before=${centerYBeforeShift}, totalYOffset=${totalYOffset}, centerY after=${centerY}`);
+      // console.log(`[SlideAnimationPrimitive] Dynamic Y offset applied: centerY before=${centerYBeforeShift}, totalYOffset=${totalYOffset}, centerY after=${centerY}`);
     } else {
       // newline系統でない場合は動的Y座標計算をスキップ
-      console.log(`[SlideAnimationPrimitive] Non-newline mode (${params.wordDisplayMode}) - skipping dynamic Y offset. centerY=${centerY}`);
+      // console.log(`[SlideAnimationPrimitive] Non-newline mode (${params.wordDisplayMode}) - skipping dynamic Y offset. centerY=${centerY})`);
     }
     
     // フレーズ退場アニメーション
@@ -543,10 +543,10 @@ export class SlideAnimationPrimitive implements AnimationPrimitive {
         );
         
         startPositionX = cumulativeWidth;
-        console.log(`[SlideAnimationPrimitive] same_line X calculation for word ${params.wordIndex}: cumulativeWidth=${cumulativeWidth}, startPositionX=${startPositionX}`);
+        // console.log(`[SlideAnimationPrimitive] same_line X calculation for word ${params.wordIndex}: cumulativeWidth=${cumulativeWidth}, startPositionX=${startPositionX}`);
       } else {
         startPositionX = 0; // 最初の単語は0から開始
-        console.log(`[SlideAnimationPrimitive] same_line X calculation for word ${params.wordIndex}: first word, startPositionX=0`);
+        // console.log(`[SlideAnimationPrimitive] same_line X calculation for word ${params.wordIndex}: first word, startPositionX=0`);
       }
       
     } else if (params.wordDisplayMode === 'individual_word_entrance_new_line' || 
@@ -684,7 +684,7 @@ export class SlideAnimationPrimitive implements AnimationPrimitive {
       [candidatePoints[i], candidatePoints[j]] = [candidatePoints[j], candidatePoints[i]];
     }
     
-    console.log(`[SlideAnimationPrimitive] Generated ${candidatePoints.length} candidate points with gridSize=${gridSize}px (minDistance=${minDistance}px)`);
+    // console.log(`[SlideAnimationPrimitive] Generated ${candidatePoints.length} candidate points with gridSize=${gridSize}px (minDistance=${minDistance}px)`);
     
     // シャッフルされた候補から距離制約を満たすものを選択
     let attempts = 0;
@@ -709,21 +709,21 @@ export class SlideAnimationPrimitive implements AnimationPrimitive {
     }
     
     // 詳細デバッグログ：生成結果とY座標分布を出力
-    console.log(`[SlideAnimationPrimitive] generateOffsetList: Generated ${offsets.length}/${targetCount} offsets (attempts=${attempts})`);
+    // console.log(`[SlideAnimationPrimitive] generateOffsetList: Generated ${offsets.length}/${targetCount} offsets (attempts=${attempts})`);
     
     if (offsets.length > 0) {
       const yValues = offsets.map(o => o.y);
       const uniqueYCount = new Set(yValues.map(y => Math.round(y))).size; // 1px精度で種類数計算
       const yMin = Math.min(...yValues);
       const yMax = Math.max(...yValues);
-      console.log(`[SlideAnimationPrimitive] Y座標分布: ${uniqueYCount}種類, 範囲[${yMin.toFixed(1)} ~ ${yMax.toFixed(1)}]`);
+      // console.log(`[SlideAnimationPrimitive] Y座標分布: ${uniqueYCount}種類, 範囲[${yMin.toFixed(1)} ~ ${yMax.toFixed(1)}]`);
       
       // 最初の10個のオフセットを表示
-      console.log(`[SlideAnimationPrimitive] 最初の10個のオフセット:`, offsets.slice(0, 10).map(o => `(${o.x.toFixed(1)}, ${o.y.toFixed(1)})`));
+      // console.log(`[SlideAnimationPrimitive] 最初の10個のオフセット:`, offsets.slice(0, 10).map(o => `(${o.x.toFixed(1)}, ${o.y.toFixed(1)})`));
     }
     
     if (offsets.length < targetCount) {
-      console.warn(`[SlideAnimationPrimitive] generateOffsetList: Only generated ${offsets.length}/${targetCount} offsets with minDistance=${minDistance}, rangeX=${rangeX}, rangeY=${rangeY}`);
+      // console.warn(`[SlideAnimationPrimitive] generateOffsetList: Only generated ${offsets.length}/${targetCount} offsets with minDistance=${minDistance}, rangeX=${rangeX}, rangeY=${rangeY}`);
     }
     
     return offsets;

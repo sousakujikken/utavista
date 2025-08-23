@@ -44,7 +44,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
   // 状態更新ヘルパー関数
   const updateState = useCallback((updates: Partial<typeof state>) => {
     setState(prev => ({ ...prev, ...updates }));
-  }, []);
+  }, []); // 依存関係なしで安定した関数参照を保つ
   
   
   // 前回のパラメータを記録するRef
@@ -119,25 +119,29 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
           currentStatus
         });
         
-        if (state.useIndividualSettings !== currentStatus) {
-          console.log('[TemplateTab] Selection update - before:', {
-            useIndividualSettings: state.useIndividualSettings,
-            editorMode: state.editorMode,
-            currentStatus
-          });
-          
-          updateState({ useIndividualSettings: currentStatus });
-          
-          console.log('[TemplateTab] Selection update - after:', {
-            useIndividualSettings: currentStatus,
-            editorMode: state.editorMode
-          });
-        }
+        // stateをuseEffectの外で参照することを避けるため、setStateで現在の状態を取得
+        setState(prevState => {
+          if (prevState.useIndividualSettings !== currentStatus) {
+            console.log('[TemplateTab] Selection update - before:', {
+              useIndividualSettings: prevState.useIndividualSettings,
+              editorMode: prevState.editorMode,
+              currentStatus
+            });
+            
+            console.log('[TemplateTab] Selection update - after:', {
+              useIndividualSettings: currentStatus,
+              editorMode: prevState.editorMode
+            });
+            
+            return { ...prevState, useIndividualSettings: currentStatus };
+          }
+          return prevState;
+        });
       }
     }, 100);
     
     return () => clearTimeout(timeoutId);
-  }, [selectedObjectIds, engine, updateState]);
+  }, [selectedObjectIds, engine]);
   
   // タブがフォーカスされた時にも同期（手動で呼び出し可能にする）
   useEffect(() => {
@@ -240,11 +244,14 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       }
       
       // UI状態を実際の状態に同期
-      if (hasIndividualSettings !== state.useIndividualSettings) {
-        updateState({ useIndividualSettings: hasIndividualSettings });
-      }
+      setState(prevState => {
+        if (hasIndividualSettings !== prevState.useIndividualSettings) {
+          return { ...prevState, useIndividualSettings: hasIndividualSettings };
+        }
+        return prevState;
+      });
     }
-  }, [selectedObjectIds, selectedObjectType, engine, updateState]);
+  }, [selectedObjectIds, selectedObjectType, engine]);
   
   // TemplateManagerのセットアップ
   useEffect(() => {
@@ -756,23 +763,27 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
     const paramsCopy = JSON.parse(JSON.stringify(updatedParams));
     
     // V2対応のラッパーメソッドを使用
+    console.log('[TemplateTab] handleGlobalParamChange called, engine.updateGlobalParameters exists:', !!engine.updateGlobalParameters);
     if (engine.updateGlobalParameters) {
+      console.log('[TemplateTab] Calling engine.updateGlobalParameters');
       engine.updateGlobalParameters(paramsCopy);
+      // updateGlobalParameters内で最適化された更新が実行されるため、
+      // ここでの追加更新は不要
     } else {
+      console.log('[TemplateTab] Falling back to engine.updateGlobalParams');
       // フォールバック: V1メソッド
       engine.updateGlobalParams(paramsCopy);
-    }
-    
-    // リアルタイム反映のため強制レンダリング
-    if (engine.instanceManager) {
-      engine.instanceManager.updateExistingInstances();
-      if (engine.currentTime !== undefined) {
-        engine.instanceManager.update(engine.currentTime);
+      // V1の場合のみ強制レンダリング
+      if (engine.instanceManager) {
+        engine.instanceManager.updateExistingInstances();
+        if (engine.currentTime !== undefined) {
+          engine.instanceManager.update(engine.currentTime);
+        }
       }
     }
     
-    updateState({ globalParams: paramsCopy });
-  }, [engine, updateState]);
+    setState(prev => ({ ...prev, globalParams: paramsCopy }));
+  }, [engine]);
   
   // オブジェクトパラメータ変更ハンドラ（統合版・V2対応）
   const handleObjectParamChange = useCallback((updatedParams: Record<string, any>) => {
@@ -837,16 +848,18 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
         console.log('[TemplateTab] Clear operation successful, forcing immediate UI state update');
         
         // 即座に状態を false に設定（クリア操作の結果を即座に反映）
-        console.log('[TemplateTab] Clear update - before:', {
-          useIndividualSettings: state.useIndividualSettings,
-          editorMode: state.editorMode
-        });
-        
-        updateState({ useIndividualSettings: false });
-        
-        console.log('[TemplateTab] Clear update - after:', {
-          useIndividualSettings: false,
-          editorMode: state.editorMode
+        setState(prevState => {
+          console.log('[TemplateTab] Clear update - before:', {
+            useIndividualSettings: prevState.useIndividualSettings,
+            editorMode: prevState.editorMode
+          });
+          
+          console.log('[TemplateTab] Clear update - after:', {
+            useIndividualSettings: false,
+            editorMode: prevState.editorMode
+          });
+          
+          return { ...prevState, useIndividualSettings: false };
         });
         
         // パラメータ表示をクリア
@@ -872,7 +885,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
         console.error('TemplateTab: 個別パラメータのクリアに失敗しました');
       }
     }
-  }, [engine, selectedObjectIds, selectedObjectType, updateState, setForceUpdate]);
+  }, [engine, selectedObjectIds, selectedObjectType, setForceUpdate]);
 
   // オブジェクトの個別設定を有効化（フレーズレベル統一）
   const handleEnableIndividualSettings = useCallback(() => {
@@ -1074,7 +1087,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       });
       window.dispatchEvent(event);
     }
-  }, [engine, selectedObjectIds, selectedObjectType, getCurrentTemplateId, updateState]);
+  }, [engine, selectedObjectIds, selectedObjectType, getCurrentTemplateId]);
   
   // 個別設定の現在の状態を取得
   const getIndividualSettingCurrentStatus = useCallback(() => {
@@ -1122,16 +1135,21 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       });
       
       // 状態を更新
-      console.log('[TemplateTab] State update - before:', {
-        useIndividualSettings: state.useIndividualSettings,
-        editorMode: state.editorMode
-      });
-      
-      updateState({ useIndividualSettings: currentStatus });
-      
-      console.log('[TemplateTab] State update - after:', {
-        useIndividualSettings: currentStatus,
-        editorMode: state.editorMode
+      setState(prevState => {
+        console.log('[TemplateTab] State update - before:', {
+          useIndividualSettings: prevState.useIndividualSettings,
+          editorMode: prevState.editorMode
+        });
+        
+        console.log('[TemplateTab] State update - after:', {
+          useIndividualSettings: currentStatus,
+          editorMode: prevState.editorMode
+        });
+        
+        if (prevState.useIndividualSettings !== currentStatus) {
+          return { ...prevState, useIndividualSettings: currentStatus };
+        }
+        return prevState;
       });
       
       // 強制再レンダリングを発生させて即座にUI更新
@@ -1149,7 +1167,7 @@ const TemplateTab: React.FC<TemplateTabProps> = ({
       window.removeEventListener('objects-activated', handleIndividualSettingChanged);
       window.removeEventListener('objects-deactivated', handleIndividualSettingChanged);
     };
-  }, [engine, getIndividualSettingCurrentStatus, updateState]);
+  }, [engine, getIndividualSettingCurrentStatus]);
   
   // state.useIndividualSettingsが変更された時にログを出力
   useEffect(() => {

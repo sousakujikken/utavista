@@ -328,4 +328,100 @@ initialSpeed?: number;
 
 1. テンプレートのgetParameterConfig()に含まれているか確認
 2. パラメータマネージャーで正しく処理されているか確認
-3. UIコンポーネントで正しくバインドされているか確認
+
+## パフォーマンス最適化機能（v0.5.0新機能）
+
+### ビューポート最適化システム
+
+UTAVISTA v0.5.0では、パラメータ更新時のUI応答性を向上させる最適化機能が追加されました。
+
+#### 1. 最適化メソッドの使い分け
+
+```typescript
+// 通常のパラメータ更新（全インスタンス更新 + 通知）
+parameterManager.updateGlobalDefaults(params);
+
+// 最適化されたパラメータ更新（通知無効化 + ビューポート最適化）
+parameterManager.updateGlobalDefaultsSilent(params);
+```
+
+#### 2. エンジンレベルでの最適化フロー
+
+```typescript
+// Engine.ts での最適化実装
+public updateGlobalParameters(params: Partial<StandardParameters>): void {
+  // 1. グローバルデフォルトを更新（通知無効化）
+  this.parameterManager.updateGlobalDefaultsSilent(params);
+  
+  // 2. 最適化されたパラメータ更新を使用
+  this.optimizedUpdater.updateGlobalParametersOptimized(
+    phrasesToUpdate,
+    params,
+    {
+      updatePhrase: (phraseId, updateParams) => {
+        this.parameterManager.updateParameters(phraseId, updateParams);
+      },
+      onSyncComplete: (visiblePhraseIds) => {
+        // 表示範囲内のインスタンスのみ更新
+        this.instanceManager.updateExistingInstances(visiblePhraseIds);
+      },
+      onBatchComplete: (phraseIds) => {
+        // 非同期バッチ処理完了後の処理
+      }
+    }
+  );
+}
+```
+
+#### 3. 最適化のメカニズム
+
+- **表示範囲判定**: 現在時刻±2秒のフレーズのみ同期更新
+- **通知制御**: `updateGlobalDefaultsSilent`で無駄な全インスタンス更新を回避
+- **段階的更新**: 可視フレーズ→非可視フレーズの順で処理
+
+#### 4. 開発者への影響
+
+通常のテンプレート開発では、この最適化は透明的に動作します：
+
+- **テンプレート側**: 従来通りの実装で自動的に最適化の恩恵を受ける
+- **エンジン側**: `OptimizedParameterUpdater`が自動的にパフォーマンス管理
+- **UI側**: パラメータ変更時の固まりが大幅軽減
+
+### 新しいParameterManagerV2メソッド
+
+#### updateGlobalDefaultsSilent
+
+```typescript
+/**
+ * グローバルデフォルトの更新（通知無効化版）
+ * 最適化システムで使用され、不要なインスタンス更新を防ぐ
+ */
+updateGlobalDefaultsSilent(updates: Partial<StandardParameters>): void
+```
+
+#### propagateGlobalChangesToNormalPhrases
+
+```typescript
+/**
+ * グローバル変更を通常フレーズに伝播
+ * enableNotifications パラメータで通知制御
+ */
+private propagateGlobalChangesToNormalPhrases(
+  updates: Partial<StandardParameters>, 
+  enableNotifications: boolean = true
+): void
+```
+
+### パフォーマンス測定
+
+最適化効果の確認方法：
+
+```javascript
+// ブラウザコンソールで確認可能なログ
+// ✅ 最適化成功時
+"OptimizedParameterUpdater: 表示範囲内: 3個, 範囲外: 59個"
+"InstanceManager: 最適化により0個のインスタンスを更新" // 範囲外時
+
+// ❌ 最適化前
+"InstanceManager: 873個のインスタンスを更新" // 全インスタンス更新
+```

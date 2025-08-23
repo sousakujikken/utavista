@@ -67,6 +67,8 @@
       "Bash(cd:*)",
       "Bash(touch:*)",
       "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
       "Bash(cd:*)"
     ],
     "deny": []

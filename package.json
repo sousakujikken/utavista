@@ -1,10 +1,10 @@
 {
   "name": "utavista",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "main": "dist/main/main/main.js",
   "license": "GPL-3.0",
-  "author": "UTAVISTA Project",
+  "author": "HIRO@Sousakujikken",
   "scripts": {
     "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
     "dev:renderer": "vite",

@@ -263,16 +263,18 @@ export class ParameterManagerV2 {
     if (import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
     }
     
-    // フレーズパラメータ変更時の自動個別設定有効化
-    const isCurrentlyIndividual = this.phraseIndividualSettings.get(phraseId) || false;
-    
-    if (!isCurrentlyIndividual) {
-      console.log(`[ParameterManagerV2] Auto-enabling individual setting for phrase: ${phraseId}`);
-      this.phraseIndividualSettings.set(phraseId, true);
-      
-      // 個別設定有効化の通知
-      this.notifyIndividualSettingChange(phraseId, true);
-    }
+    // フレーズパラメータ変更時の自動個別設定有効化を無効化
+    // 注意: この自動有効化はパーティクルエフェクトなどのテンプレート内部処理で
+    // 意図しない個別設定有効化を引き起こすため無効化
+    // const isCurrentlyIndividual = this.phraseIndividualSettings.get(phraseId) || false;
+    // 
+    // if (!isCurrentlyIndividual) {
+    //   console.log(`[ParameterManagerV2] Auto-enabling individual setting for phrase: ${phraseId}`);
+    //   this.phraseIndividualSettings.set(phraseId, true);
+    //   
+    //   // 個別設定有効化の通知
+    //   this.notifyIndividualSettingChange(phraseId, true);
+    // }
     
     // 変更を通知
     this.notifyParameterChange(phraseId, params);
@@ -329,6 +331,20 @@ export class ParameterManagerV2 {
    * グローバルデフォルトの更新（統一的処理）
    */
   updateGlobalDefaults(updates: Partial<StandardParameters>): void {
+    this.updateGlobalDefaultsInternal(updates, true);
+  }
+
+  /**
+   * グローバルデフォルトの更新（通知無効化版）
+   */
+  updateGlobalDefaultsSilent(updates: Partial<StandardParameters>): void {
+    this.updateGlobalDefaultsInternal(updates, false);
+  }
+
+  /**
+   * グローバルデフォルトの更新（内部実装）
+   */
+  private updateGlobalDefaultsInternal(updates: Partial<StandardParameters>, enableNotifications: boolean): void {
     // デバッグ: 実際に何が渡されているかを確認
     // console.log('[ParameterManagerV2] updateGlobalDefaults called with:', {
     //   type: Array.isArray(updates) ? 'Array' : typeof updates,
@@ -361,14 +377,14 @@ export class ParameterManagerV2 {
       this.globalDefaults = ParameterProcessor.mergeParameterObjects(this.globalDefaults, validUpdates) as CompleteParameters;
       
       // 個別設定がないフレーズのパラメータを更新
-      this.propagateGlobalChangesToNormalPhrases(validUpdates);
+      this.propagateGlobalChangesToNormalPhrases(validUpdates, enableNotifications);
     }
   }
   
   /**
    * グローバル変更を通常フレーズに伝播
    */
-  private propagateGlobalChangesToNormalPhrases(updates: Partial<StandardParameters>): void {
+  private propagateGlobalChangesToNormalPhrases(updates: Partial<StandardParameters>, enableNotifications: boolean = true): void {
     const normalPhraseIds: string[] = [];
     
     for (const [phraseId] of this.phraseParameters.entries()) {
@@ -389,11 +405,13 @@ export class ParameterManagerV2 {
         }
       }
       
-      // 変更通知
-      for (const phraseId of normalPhraseIds) {
-        const params = this.phraseParameters.get(phraseId);
-        if (params) {
-          this.notifyParameterChange(phraseId, params);
+      // 変更通知（有効化されている場合のみ）
+      if (enableNotifications) {
+        for (const phraseId of normalPhraseIds) {
+          const params = this.phraseParameters.get(phraseId);
+          if (params) {
+            this.notifyParameterChange(phraseId, params);
+          }
         }
       }
     }

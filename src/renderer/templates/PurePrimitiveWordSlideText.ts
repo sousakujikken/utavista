@@ -14,8 +14,10 @@ import {
   GlowEffectPrimitive,
   SlideAnimationPrimitive,
   FlexibleCumulativeLayoutPrimitive,
+  SparkleEffectPrimitive,
   WordDisplayMode,
-  type FlexibleCharacterData
+  type FlexibleCharacterData,
+  type SparkleEffectParams
 } from '../primitives';
 
 /**
@@ -35,6 +37,14 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
       date: "2025-08-09"
     }
   };
+
+  // レンダリングキャッシュ
+  private renderCache = new Map<string, {
+    textObject: PIXI.Text;
+    lastParams: string;
+    lastPhase: AnimationPhase;
+    lastNowMs: number;
+  }>();
   
   /**
    * パラメータ設定
@@ -96,6 +106,42 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
       
       // 単語アライメント設定
       { name: "wordOffsetX", type: "number", default: 0, min: -200, max: 200, step: 5 },
+      
+      // キラキラエフェクト設定
+      { name: "enableSparkle", type: "boolean", default: true },
+      { name: "sparkleCount", type: "number", default: 4, min: 1, max: 20, step: 1 },
+      { name: "sparkleSize", type: "number", default: 20, min: 4, max: 40, step: 1 },
+      { name: "sparkleColor", type: "color", default: "#FFD700" },
+      { name: "sparkleStarSpikes", type: "number", default: 5, min: 3, max: 12, step: 1 },
+      { name: "sparkleScale", type: "number", default: 1.0, min: 0.5, max: 5.0, step: 0.1 },
+      { name: "sparkleDuration", type: "number", default: 1500, min: 500, max: 3000, step: 100 },
+      { name: "sparkleRadius", type: "number", default: 30, min: 10, max: 100, step: 5 },
+      { name: "sparkleAnimationSpeed", type: "number", default: 1.0, min: 0.1, max: 3.0, step: 0.1 },
+      { name: "sparkleAlphaDecay", type: "number", default: 0.98, min: 0.9, max: 0.99, step: 0.01 },
+      { name: "sparkleRotationSpeed", type: "number", default: 0.3, min: 0.0, max: 2.0, step: 0.1 },
+      { name: "sparkleGenerationRate", type: "number", default: 2.0, min: 0.5, max: 10.0, step: 0.5 },
+      { name: "sparkleVelocityCoefficient", type: "number", default: 1.0, min: 0.0, max: 3.0, step: 0.1 },
+      
+      // パーティクルグローエフェクト設定
+      { name: "enableParticleGlow", type: "boolean", default: false },
+      { name: "particleGlowStrength", type: "number", default: 1.2, min: 0.1, max: 5.0, step: 0.1 },
+      { name: "particleGlowBrightness", type: "number", default: 1.1, min: 0.5, max: 3.0, step: 0.1 },
+      { name: "particleGlowBlur", type: "number", default: 4, min: 1, max: 20, step: 1 },
+      { name: "particleGlowQuality", type: "number", default: 6, min: 2, max: 32, step: 1 },
+      { name: "particleGlowThreshold", type: "number", default: 0.1, min: 0.0, max: 1.0, step: 0.1 },
+      
+      // パーティクル瞬きエフェクト設定
+      { name: "enableTwinkle", type: "boolean", default: false },
+      { name: "twinkleFrequency", type: "number", default: 0.5, min: 0.1, max: 5.0, step: 0.1 },
+      { name: "twinkleBrightness", type: "number", default: 2.5, min: 1.0, max: 10.0, step: 0.5 },
+      { name: "twinkleDuration", type: "number", default: 100, min: 50, max: 500, step: 10 },
+      { name: "twinkleProbability", type: "number", default: 0.3, min: 0.0, max: 1.0, step: 0.1 },
+      
+      // パーティクルサイズ縮小エフェクト設定
+      { name: "enableSizeShrink", type: "boolean", default: false },
+      { name: "sizeShrinkRate", type: "number", default: 1.0, min: 0.0, max: 3.0, step: 0.1 },
+      { name: "sizeShrinkRandomRange", type: "number", default: 0.0, min: 0.0, max: 1.0, step: 0.1 },
+      
       { name: "wordOffsetY", type: "number", default: 0, min: -200, max: 200, step: 5 },
       { name: "randomPlacement", type: "boolean", default: true },
       { name: "randomSeed", type: "number", default: 0, min: 0, max: 1000, step: 1 },
@@ -131,7 +177,7 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
   }
   
   /**
-   * 表示要素のみを削除するメソッド
+   * 表示要素のみを削除するメソッド + レンダリングキャッシュクリア
    */
   removeVisualElements(container: PIXI.Container): void {
     const childrenToKeep: PIXI.DisplayObject[] = [];
@@ -157,6 +203,9 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
         child.destroy();
       }
     });
+    
+    // レンダリングキャッシュをクリア
+    this.renderCache.clear();
   }
   
   /**
@@ -207,6 +256,9 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
     _hierarchyType: HierarchyType
   ): boolean {
     
+    // フレーズ終了時刻をパラメータに設定（下位階層で使用）
+    params.phraseEndMs = endMs;
+    
     // SlideAnimationPrimitive使用してフレーズ位置計算
     const slideAnimationPrimitive = new SlideAnimationPrimitive();
     
@@ -249,9 +301,9 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
     const currentTime = nowMs - startMs;
     
     // フレーズ開始から1秒間のみログ出力（過度な出力を防ぐ）
-    if (currentTime >= 0 && currentTime <= 1000) {
-      console.log(`[PurePrimitiveWordSlideText] PHRASE_POSITION: id="${phraseIdForLog}", time=${currentTime}ms, xy=(${slideResult.x.toFixed(1)}, ${slideResult.y.toFixed(1)}), alpha=${slideResult.alpha.toFixed(2)}`);
-    }
+    // if (currentTime >= 0 && currentTime <= 1000) {
+    //   console.log(`[PurePrimitiveWordSlideText] PHRASE_POSITION: id="${phraseIdForLog}", time=${currentTime}ms, xy=(${slideResult.x.toFixed(1)}, ${slideResult.y.toFixed(1)}), alpha=${slideResult.alpha.toFixed(2)}`);
+    // }
     
     // Y座標の種類を追跡（グローバル変数に記録）
     if (!(window as any).__Y_COORDINATE_TRACKER__) {
@@ -260,10 +312,10 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
     (window as any).__Y_COORDINATE_TRACKER__.add(Math.round(slideResult.y * 10) / 10);
     
     // 追跡状況を定期的に報告
-    if (Math.random() < 0.1) { // 10%の確率で状況報告
-      const trackedYs = (window as any).__Y_COORDINATE_TRACKER__;
-      console.log(`[PurePrimitiveWordSlideText] Y_COORDINATE_SUMMARY: ${trackedYs.size}種類のY座標を確認 [${Array.from(trackedYs).sort((a,b) => a-b).slice(0, 10).join(', ')}...]`);
-    }
+    // if (Math.random() < 0.1) { // 10%の確率で状況報告
+    //   const trackedYs = (window as any).__Y_COORDINATE_TRACKER__;
+    //   console.log(`[PurePrimitiveWordSlideText] Y_COORDINATE_SUMMARY: ${trackedYs.size}種類のY座標を確認 [${Array.from(trackedYs).sort((a,b) => a-b).slice(0, 10).join(', ')}...]`);
+    // }
     
     // GlowEffectPrimitive使用
     const glowPrimitive = new GlowEffectPrimitive();
@@ -337,8 +389,8 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
         wordIndex: charData.wordIndex !== undefined ? charData.wordIndex : currentWordIndex
       }));
       
-      console.log(`[PurePrimitiveWordSlideText] Original chars data ALL:`, charsData.map(c => ({ id: c.id, char: c.char, wordIndex: c.wordIndex })));
-      console.log(`[PurePrimitiveWordSlideText] Corrected chars data ALL:`, correctedCharsData.map(c => ({ id: c.id, char: c.char, wordIndex: c.wordIndex })));
+      // console.log(`[PurePrimitiveWordSlideText] Original chars data ALL:`, charsData.map(c => ({ id: c.id, char: c.char, wordIndex: c.wordIndex })));
+      // console.log(`[PurePrimitiveWordSlideText] Corrected chars data ALL:`, correctedCharsData.map(c => ({ id: c.id, char: c.char, wordIndex: c.wordIndex })));
     }
     
     // same_lineモード用の累積文字オフセット計算はプリミティブ側で実行
@@ -455,6 +507,9 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
           'char',
           phase
         );
+        
+        // レイアウト後にスパークルエフェクトを適用
+        this.applySparkleEffectAfterLayout(charContainer, charData.char, params, nowMs, charData.start, charData.end, charData.charIndex, params.phraseEndMs as number);
       }
     );
     
@@ -462,7 +517,107 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
   }
   
   /**
-   * 文字コンテナの描画（完全プリミティブベース）
+   * レイアウト後のスパークルエフェクト適用
+   */
+  private applySparkleEffectAfterLayout(
+    container: PIXI.Container,
+    text: string,
+    params: Record<string, unknown>,
+    nowMs: number,
+    startMs: number,
+    endMs: number,
+    charIndex: number,
+    phraseEndMs?: number
+  ): void {
+    if (!(params.enableSparkle as boolean)) {
+      return;
+    }
+    
+    // キラキラエフェクトの管理（文字座標中心版）
+    const sparklePrimitive = new SparkleEffectPrimitive();
+    
+    // ワールド変換を強制更新してから座標を取得
+    if (container.parent) {
+      container.parent.updateTransform();
+    }
+    container.updateTransform();
+    
+    // 複数の方法で座標を取得して確実性を高める
+    const bounds = container.getBounds();
+    const globalPosition = {
+      x: bounds.x + bounds.width / 2,  // 中心座標を計算
+      y: bounds.y + bounds.height / 2
+    };
+    
+    // フォールバック: transform座標も確認
+    const transformPos = {
+      x: container.worldTransform.tx,
+      y: container.worldTransform.ty
+    };
+    
+    // console.log(`[CharPositionAfterLayout] Char "${text}" bounds: (${bounds.x.toFixed(1)}, ${bounds.y.toFixed(1)}) size: ${bounds.width.toFixed(1)}x${bounds.height.toFixed(1)}`);
+    // console.log(`[CharPositionAfterLayout] Char "${text}" transform: (${transformPos.x.toFixed(1)}, ${transformPos.y.toFixed(1)}) final: (${globalPosition.x.toFixed(1)}, ${globalPosition.y.toFixed(1)})`);
+    
+    // 文字特定のための一意ID生成
+    const phraseId = params.phraseId as string || 'phrase';
+    const wordId = params.wordId as string || 'word';
+    const charId = `${phraseId}_${wordId}_${charIndex}_${text}`;
+    
+    const sparkleParams: SparkleEffectParams = {
+      enableSparkle: (params.enableSparkle as boolean !== false), 
+      sparkleCount: params.sparkleCount as number || 4,
+      sparkleSize: params.sparkleSize as number || 20,
+      sparkleColor: params.sparkleColor as string || '#FFD700',
+      sparkleStarSpikes: params.sparkleStarSpikes as number || 5,
+      sparkleScale: params.sparkleScale as number || 1.0,
+      sparkleDuration: params.sparkleDuration as number || 1500,
+      sparkleRadius: params.sparkleRadius as number || 30,
+      sparkleAnimationSpeed: params.sparkleAnimationSpeed as number || 1.0,
+      sparkleAlphaDecay: params.sparkleAlphaDecay as number || 0.98,
+      sparkleRotationSpeed: params.sparkleRotationSpeed as number || 0.3,
+      sparkleGenerationRate: params.sparkleGenerationRate as number || 2.0,
+      sparkleVelocityCoefficient: params.sparkleVelocityCoefficient as number || 1.0,
+      nowMs,
+      startMs,
+      endMs,
+      phraseEndMs: phraseEndMs, // フレーズ全体の終了時刻
+      tailTime: params.tailTime as number || 500, // フレーズのtailtime
+      text,
+      globalPosition: globalPosition,
+      // 文字識別情報（決定論的シード生成用）
+      phraseId: phraseId,
+      wordId: wordId,
+      charIndex: charIndex,
+      charId: charId,
+      intensity: 1.0,
+      // パーティクルグローエフェクト設定
+      enableParticleGlow: params.enableParticleGlow as boolean || false,
+      particleGlowStrength: params.particleGlowStrength as number || 1.2,
+      particleGlowBrightness: params.particleGlowBrightness as number || 1.1,
+      particleGlowBlur: params.particleGlowBlur as number || 4,
+      particleGlowQuality: params.particleGlowQuality as number || 6,
+      particleGlowThreshold: params.particleGlowThreshold as number || 0.1,
+      
+      // パーティクル瞬きエフェクト設定
+      enableTwinkle: params.enableTwinkle as boolean ?? true,
+      twinkleFrequency: params.twinkleFrequency as number || 1.0,
+      twinkleBrightness: params.twinkleBrightness as number || 3.0,
+      twinkleDuration: params.twinkleDuration as number || 120,
+      twinkleProbability: params.twinkleProbability as number || 0.8,
+      
+      // パーティクルサイズ縮小エフェクト設定
+      enableSizeShrink: params.enableSizeShrink as boolean || false,
+      sizeShrinkRate: params.sizeShrinkRate as number || 1.0,
+      sizeShrinkRandomRange: params.sizeShrinkRandomRange as number || 0.0
+    };
+    
+    sparklePrimitive.applyEffect(container, sparkleParams);
+    
+    // console.log(`[SparkleAfterLayout] Applied sparkle effect to char "${text}" (index: ${charIndex}) at global pos (${globalPosition.x.toFixed(1)}, ${globalPosition.y.toFixed(1)})`);
+  }
+  
+  /**
+   * 文字コンテナの描画（完全プリミティブベース + レンダリングキャッシュ）
    */
   renderCharContainer(
     container: PIXI.Container,
@@ -471,16 +626,48 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
     nowMs: number,
     startMs: number,
     endMs: number,
-    _phase: AnimationPhase,
+    phase: AnimationPhase,
     _hierarchyType: HierarchyType
   ): boolean {
+    
+    // キャッシュキーを生成
+    const cacheKey = `${container.name || 'unknown'}_${text}`;
+    
+    // パラメータハッシュを生成（レンダリングに影響するパラメータのみ）
+    const relevantParams = {
+      fontSize: params.fontSize,
+      fontFamily: params.fontFamily,
+      textColor: params.textColor,
+      activeTextColor: params.activeTextColor,
+      completedTextColor: params.completedTextColor,
+      enableGlow: params.enableGlow,
+      glowStrength: params.glowStrength,
+      glowColor: params.glowColor,
+      enableShadow: params.enableShadow,
+      shadowDistance: params.shadowDistance,
+      shadowColor: params.shadowColor,
+      blendMode: params.blendMode
+    };
+    const paramsHash = JSON.stringify(relevantParams);
+    
+    // キャッシュチェック
+    const cached = this.renderCache.get(cacheKey);
+    if (cached && 
+        cached.lastParams === paramsHash && 
+        cached.lastPhase === phase &&
+        Math.abs(cached.lastNowMs - nowMs) < 50) { // 50ms以内の時間差は無視
+      
+      // キャッシュされたテキストオブジェクトを使用
+      if (container.children.length === 0) {
+        container.addChild(cached.textObject);
+      }
+      return true;
+    }
     
     // フレーズ一括入場モードかどうかを判定
     const wordDisplayModeStr = params.wordDisplayMode as string || "individual_word_entrance_same_line";
     const isPhraseCumulativeMode = wordDisplayModeStr === "phrase_cumulative_same_line" || 
                                    wordDisplayModeStr === "phrase_cumulative_new_line";
-    
-    console.log(`[PurePrimitiveWordSlideText] renderCharContainer: char="${text}", wordDisplayMode="${wordDisplayModeStr}", isPhraseCumulativeMode=${isPhraseCumulativeMode}`);
     
     // フレーズ一括入場モードの場合は、プリミティブ側の制御を完全に委譲し、
     // テキストオブジェクトが存在する場合は再作成を避ける
@@ -536,6 +723,16 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
     
     container.addChild(textObj);
     
+    // レンダリングキャッシュに保存
+    this.renderCache.set(cacheKey, {
+      textObject: textObj,
+      lastParams: paramsHash,
+      lastPhase: phase,
+      lastNowMs: nowMs
+    });
+    
+    // NOTE: スパークルエフェクトはレイアウト後に applySparkleEffectAfterLayout() で適用
+    
     // デバッグログ出力（最小限に）
     const hasNaNPosition = isNaN(container.worldTransform.tx) || isNaN(container.worldTransform.ty);
     const isFirstChar = (params.charIndex as number || 0) === 0;
@@ -544,7 +741,7 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
       console.error(`[PurePrimitiveWordSlideText] NaN position detected for char "${text}"`);
     } else if (isFirstChar && !isPhraseCumulativeMode) {
       // フレーズ一括入場モードでない場合のみ成功ログ表示
-      console.log(`[PurePrimitiveWordSlideText] Successfully rendered first char "${text}" at world position (${container.worldTransform.tx}, ${container.worldTransform.ty})`);
+      // console.log(`[PurePrimitiveWordSlideText] Successfully rendered first char "${text}" at world position (${container.worldTransform.tx}, ${container.worldTransform.ty})`);
     }
     
     return true;

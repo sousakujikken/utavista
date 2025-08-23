@@ -610,53 +610,103 @@ export class InstanceManager {
   }
 
   // 既存インスタンスのプロパティのみ更新（配置に影響しないパラメータ変更時）
-  updateExistingInstances() {
+  updateExistingInstances(phraseIds?: string[]) {
     if (import.meta.env.DEV && Math.random() < 0.05) { // 5%の確率でのみ出力
     }
     
     let updatedCount = 0;
-    for (const [id, instance] of this.instances.entries()) {
-      if (instance.template && instance.objectId) {
-        let params: Record<string, any> = {};
-        
-        // V2専用: 直接パラメータを取得
-        if (this.parameterManagerV2) {
-          params = this.parameterManagerV2.getParameters(instance.objectId);
-          
-          // デバッグ：重要なパラメータの変更を記録
-          const oldFont = instance.params.fontFamily;
-          const newFont = params.fontFamily;
-          if (oldFont !== newFont && import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
-          }
-        } else {
-          console.warn(`InstanceManager: ParameterManagerV2が利用できません: ${instance.objectId}`);
-          continue;
+    
+    // phraseIds が明示的に指定されている場合のみ更新
+    if (phraseIds !== undefined) {
+      // 空の配列が渡された場合は何も更新しない（最適化）
+      if (phraseIds.length === 0) {
+        console.log(`InstanceManager: 最適化により0個のインスタンスを更新`);
+        return;
+      }
+      
+      // 更新対象を限定する場合
+      const phraseIdSet = new Set(phraseIds);
+      
+      // フレーズインスタンスとその子要素のみ更新
+      for (const phraseId of phraseIds) {
+        // フレーズインスタンス
+        const phraseInstance = this.instances.get(phraseId);
+        if (phraseInstance) {
+          this.updateSingleInstanceInternal(phraseInstance);
+          updatedCount++;
         }
         
-        // 保持すべき特殊パラメータのリスト
-        const preservedParams = {
-          id: instance.params.id,
-          words: instance.params.words,
-          chars: instance.params.chars,
-          charIndex: instance.params.charIndex,
-          totalChars: instance.params.totalChars,
-          totalWords: instance.params.totalWords,
-          wordIndex: instance.params.wordIndex,
-          phrasePhase: instance.params.phrasePhase,
-          phraseStartMs: instance.params.phraseStartMs,
-          phraseEndMs: instance.params.phraseEndMs
-        };
-        
-        // パラメータを更新（特殊パラメータは保持）
-        instance.params = { ...params, ...preservedParams };
-        updatedCount++;
-        
-        // 個別設定フレーズログ削除済み
+        // 関連する単語・文字インスタンスを取得して更新
+        const childrenIds = this.getChildrenIds(phraseId);
+        for (const childId of childrenIds) {
+          const childInstance = this.instances.get(childId);
+          if (childInstance) {
+            this.updateSingleInstanceInternal(childInstance);
+            updatedCount++;
+            
+            // 文字インスタンスも取得（単語の子要素）
+            const grandChildrenIds = this.getChildrenIds(childId);
+            for (const grandChildId of grandChildrenIds) {
+              const grandChildInstance = this.instances.get(grandChildId);
+              if (grandChildInstance) {
+                this.updateSingleInstanceInternal(grandChildInstance);
+                updatedCount++;
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // 全インスタンスを更新（従来の動作）
+      for (const [id, instance] of this.instances.entries()) {
+        if (instance.template && instance.objectId) {
+          this.updateSingleInstanceInternal(instance);
+          updatedCount++;
+        }
       }
     }
     
     if (import.meta.env.DEV && Math.random() < 0.1) { // 10%の確率でのみ出力
+      console.log(`InstanceManager: ${updatedCount}個のインスタンスを更新`);
     }
+  }
+  
+  // 単一インスタンスのパラメータ更新（内部用）
+  private updateSingleInstanceInternal(instance: AnimationInstance) {
+    if (!instance.template || !instance.objectId) return;
+    
+    let params: Record<string, any> = {};
+    
+    // V2専用: 直接パラメータを取得
+    if (this.parameterManagerV2) {
+      params = this.parameterManagerV2.getParameters(instance.objectId);
+      
+      // デバッグ：重要なパラメータの変更を記録
+      const oldFont = instance.params.fontFamily;
+      const newFont = params.fontFamily;
+      if (oldFont !== newFont && import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
+      }
+    } else {
+      console.warn(`InstanceManager: ParameterManagerV2が利用できません: ${instance.objectId}`);
+      return;
+    }
+    
+    // 保持すべき特殊パラメータのリスト
+    const preservedParams = {
+      id: instance.params.id,
+      words: instance.params.words,
+      chars: instance.params.chars,
+      charIndex: instance.params.charIndex,
+      totalChars: instance.params.totalChars,
+      totalWords: instance.params.totalWords,
+      wordIndex: instance.params.wordIndex,
+      phrasePhase: instance.params.phrasePhase,
+      phraseStartMs: instance.params.phraseStartMs,
+      phraseEndMs: instance.params.phraseEndMs
+    };
+    
+    // パラメータを更新（特殊パラメータは保持）
+    instance.params = { ...params, ...preservedParams };
   }
 
   // すべてのインスタンスをクリア

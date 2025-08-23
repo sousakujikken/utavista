@@ -45,6 +45,10 @@ export {
   GlitchEffectPrimitive,
   type GlitchEffectParams
 } from './effects/GlitchEffectPrimitive';
+export { 
+  SparkleEffectPrimitive,
+  type SparkleEffectParams
+} from './effects/SparkleEffectPrimitive';
 
 // 安全なプリミティブシステム（v2.1新機能）
 export { 

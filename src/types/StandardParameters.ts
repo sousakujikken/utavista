@@ -119,6 +119,41 @@ export interface StandardParameters {
   glitchThreshold?: number;
   glitchWaveSpeed?: number;
   glitchRandomness?: number;
+  
+  // SparkleEffect固有のパラメータ
+  enableSparkle?: boolean;
+  sparkleCount?: number;
+  sparkleSize?: number;
+  sparkleColor?: string;
+  sparkleStarSpikes?: number;
+  sparkleScale?: number;
+  sparkleDuration?: number;
+  sparkleRadius?: number;
+  sparkleAnimationSpeed?: number;
+  sparkleAlphaDecay?: number;
+  sparkleRotationSpeed?: number;
+  sparkleGenerationRate?: number;
+  sparkleVelocityCoefficient?: number;
+  
+  // パーティクルグローエフェクトパラメータ
+  enableParticleGlow?: boolean;
+  particleGlowStrength?: number;
+  particleGlowBrightness?: number;
+  particleGlowBlur?: number;
+  particleGlowQuality?: number;
+  particleGlowThreshold?: number;
+  
+  // パーティクル瞬きエフェクトパラメータ
+  enableTwinkle?: boolean;
+  twinkleFrequency?: number;
+  twinkleBrightness?: number;
+  twinkleDuration?: number;
+  twinkleProbability?: number;
+  
+  // パーティクルサイズ縮小エフェクトパラメータ
+  enableSizeShrink?: boolean;
+  sizeShrinkRate?: number;
+  sizeShrinkRandomRange?: number;
 }
 
 /**
@@ -235,5 +270,40 @@ export const DEFAULT_PARAMETERS: StandardParameters = {
   exitCopyColor: '#FFFFFF',
   exitAnimationDuration: 10,
   copyPositionRandomRange: 50,
-  copyPositionSeed: 54321
+  copyPositionSeed: 54321,
+  
+  // SparkleEffect用デフォルト値
+  enableSparkle: false,
+  sparkleCount: 3,
+  sparkleSize: 20,
+  sparkleColor: '#FFD700',
+  sparkleStarSpikes: 5,
+  sparkleScale: 1.0,
+  sparkleDuration: 1500,
+  sparkleRadius: 30,
+  sparkleAnimationSpeed: 1.0,
+  sparkleAlphaDecay: 0.8,
+  sparkleRotationSpeed: 0.3,
+  sparkleGenerationRate: 2.0,
+  sparkleVelocityCoefficient: 1.0,
+  
+  // パーティクルグローエフェクト用デフォルト値
+  enableParticleGlow: false,
+  particleGlowStrength: 1.2,
+  particleGlowBrightness: 1.1,
+  particleGlowBlur: 4,
+  particleGlowQuality: 6,
+  particleGlowThreshold: 0.1,
+  
+  // パーティクル瞬きエフェクト用デフォルト値
+  enableTwinkle: false,
+  twinkleFrequency: 0.5,
+  twinkleBrightness: 2.5,
+  twinkleDuration: 100,
+  twinkleProbability: 0.3,
+  
+  // パーティクルサイズ縮小エフェクト用デフォルト値
+  enableSizeShrink: false,
+  sizeShrinkRate: 1.0,
+  sizeShrinkRandomRange: 0.0
 };

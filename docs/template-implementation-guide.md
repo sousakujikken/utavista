@@ -23,21 +23,23 @@
 1. [前提知識と準備](#前提知識と準備)
 2. [🎯 画面中心配置の標準仕様（v0.4.3標準）](#画面中心配置の標準仕様)
 3. [🚨 文字重複表示防止ガイド（v2.1新機能）](#文字重複表示防止ガイド)
-4. [📋 安全なテンプレート実装チェックリスト（v2.1）](#安全なテンプレート実装チェックリスト)
-5. [現行システムアーキテクチャの理解](#現行システムアーキテクチャの理解)
-6. [基本構造の実装](#基本構造の実装)
-7. [階層対応のアニメーション実装](#階層対応のアニメーション実装)
-8. [パラメータレジストリ登録と管理](#パラメータレジストリ登録と管理)
-9. [文字・単語カウント管理](#文字・単語カウント管理)
-10. [PixiJSフィルタとエフェクト実装](#PixiJSフィルタとエフェクト実装)
-11. [FontService統合とフォント管理](#FontService統合とフォント管理)
-12. [パフォーマンス最適化技法](#パフォーマンス最適化技法)
-13. [エラーハンドリングとデバッグ](#エラーハンドリングとデバッグ)
-14. [文字位置計算の実装ガイド](#文字位置計算の実装ガイド)
-15. [テンプレートレジストリへの登録](#テンプレートレジストリへの登録)
-16. [実装パターン総合ガイド](#実装パターン総合ガイド)
-17. [フレーズタイミング優先実装ガイド](#フレーズタイミング優先実装ガイドv043新機能)
-18. [よくある失敗事例と対策](#よくある失敗事例と対策)
+4. [⚡ レンダリング最適化実装（v0.5.0新機能）](#レンダリング最適化実装)
+5. [🔧 プリミティブパラメータメンテナンス（重要）](#プリミティブパラメータメンテナンス)
+6. [📋 安全なテンプレート実装チェックリスト（v2.1）](#安全なテンプレート実装チェックリスト)
+6. [現行システムアーキテクチャの理解](#現行システムアーキテクチャの理解)
+7. [基本構造の実装](#基本構造の実装)
+8. [階層対応のアニメーション実装](#階層対応のアニメーション実装)
+9. [パラメータレジストリ登録と管理](#パラメータレジストリ登録と管理)
+10. [文字・単語カウント管理](#文字・単語カウント管理)
+11. [PixiJSフィルタとエフェクト実装](#PixiJSフィルタとエフェクト実装)
+12. [FontService統合とフォント管理](#FontService統合とフォント管理)
+13. [パフォーマンス最適化技法](#パフォーマンス最適化技法)
+14. [エラーハンドリングとデバッグ](#エラーハンドリングとデバッグ)
+15. [文字位置計算の実装ガイド](#文字位置計算の実装ガイド)
+16. [テンプレートレジストリへの登録](#テンプレートレジストリへの登録)
+17. [実装パターン総合ガイド](#実装パターン総合ガイド)
+18. [フレーズタイミング優先実装ガイド](#フレーズタイミング優先実装ガイドv043新機能)
+19. [よくある失敗事例と対策](#よくある失敗事例と対策)
 
 ---
 
@@ -322,6 +324,211 @@ if (process.env.NODE_ENV === 'development') {
   CharacterOverlapDetector.autoCheck(wordContainer);
 }
 ```
+
+---
+
+## ⚡ レンダリング最適化実装（v0.5.0新機能）
+
+**UTAVISTA v0.5.0では、大規模プロジェクトでのUI応答性を向上させるレンダリング最適化機能が追加されました。**
+
+### レンダリングキャッシュシステム
+
+パラメータ変更時のUI固まりを防止するため、文字オブジェクトのキャッシュ機能を実装できます。
+
+#### 1. 基本実装パターン
+
+```typescript
+export class OptimizedTemplate implements IAnimationTemplate {
+  // レンダリングキャッシュ
+  private renderCache = new Map<string, {
+    textObject: PIXI.Text;
+    lastParams: string;
+    lastPhase: AnimationPhase;
+    lastNowMs: number;
+  }>();
+
+  renderCharContainer(
+    container: PIXI.Container,
+    text: string,
+    params: Record<string, unknown>,
+    nowMs: number,
+    startMs: number,
+    endMs: number,
+    phase: AnimationPhase,
+    hierarchyType: HierarchyType
+  ): boolean {
+    
+    // 1. キャッシュキーを生成
+    const cacheKey = `${container.name || 'unknown'}_${text}`;
+    
+    // 2. レンダリングに影響するパラメータのみでハッシュ生成
+    const relevantParams = {
+      fontSize: params.fontSize,
+      fontFamily: params.fontFamily,
+      textColor: params.textColor,
+      enableGlow: params.enableGlow,
+      glowStrength: params.glowStrength,
+      // 必要に応じて他のパラメータを追加
+    };
+    const paramsHash = JSON.stringify(relevantParams);
+    
+    // 3. キャッシュチェック
+    const cached = this.renderCache.get(cacheKey);
+    if (cached && 
+        cached.lastParams === paramsHash && 
+        cached.lastPhase === phase &&
+        Math.abs(cached.lastNowMs - nowMs) < 50) { // 50ms以内の時間差は無視
+      
+      // キャッシュされたテキストオブジェクトを使用
+      if (container.children.length === 0) {
+        container.addChild(cached.textObject);
+      }
+      return true;
+    }
+    
+    // 4. 新しいテキストオブジェクトを作成
+    container.removeChildren();
+    const textObj = new PIXI.Text(text, textStyle);
+    container.addChild(textObj);
+    
+    // 5. キャッシュに保存
+    this.renderCache.set(cacheKey, {
+      textObject: textObj,
+      lastParams: paramsHash,
+      lastPhase: phase,
+      lastNowMs: nowMs
+    });
+    
+    return true;
+  }
+
+  // 6. キャッシュクリア（removeVisualElementsで実行）
+  removeVisualElements(container: PIXI.Container): void {
+    // 通常のクリーンアップ処理...
+    
+    // レンダリングキャッシュをクリア
+    this.renderCache.clear();
+  }
+}
+```
+
+#### 2. キャッシュ最適化のポイント
+
+- **パラメータハッシュ**: 視覚に影響しないパラメータは除外
+- **時間閾値**: 50ms以内の時間変動はキャッシュヒット
+- **フェーズ管理**: アニメーションフェーズ変更時は新規作成
+- **メモリ管理**: `removeVisualElements`でキャッシュクリア
+
+#### 3. ビューポート最適化
+
+エンジンレベルで自動実装される最適化：
+
+- **表示範囲判定**: 現在時刻±2秒のフレーズのみ同期更新
+- **非同期処理**: 表示範囲外フレーズは非同期バッチ処理
+- **更新制御**: `updateGlobalDefaultsSilent`による通知無効化
+
+### パフォーマンス効果
+
+- **UI応答性**: パラメータ変更時の固まりを大幅軽減
+- **メモリ効率**: 不要なオブジェクト生成を抑制
+- **スケーラビリティ**: 大規模プロジェクトでも安定動作
+
+---
+
+## 🔧 プリミティブパラメータメンテナンス（重要）
+
+### 新パラメータ追加時の必須同期作業
+
+**最重要**: プリミティブに新しいパラメータを追加した場合、**テンプレート側の呼び出し箇所も同期更新**が必要です。
+
+#### よくある実装ミス
+
+```typescript
+// ❌ 危険: 新パラメータが渡されない
+private applySparkleEffectAfterLayout(...): void {
+  const sparkleParams: SparkleEffectParams = {
+    enableSparkle: params.enableSparkle,
+    sparkleSize: params.sparkleSize,
+    sparkleColor: params.sparkleColor,
+    // enableTwinkle などの新パラメータが漏れている！
+  };
+  sparklePrimitive.applyEffect(container, sparkleParams);
+}
+```
+
+#### 正しい実装パターン
+
+```typescript
+// ✅ 安全: 全パラメータを明示的に渡す
+private applySparkleEffectAfterLayout(...): void {
+  const sparkleParams: SparkleEffectParams = {
+    // 基本パラメータ
+    enableSparkle: params.enableSparkle as boolean || false,
+    sparkleSize: params.sparkleSize as number || 20,
+    sparkleColor: params.sparkleColor as string || '#FFD700',
+    
+    // 新機能パラメータも忘れずに追加
+    enableTwinkle: params.enableTwinkle as boolean || false,
+    twinkleFrequency: params.twinkleFrequency as number || 0.5,
+    twinkleBrightness: params.twinkleBrightness as number || 2.5,
+    twinkleDuration: params.twinkleDuration as number || 100,
+    twinkleProbability: params.twinkleProbability as number || 0.3,
+  };
+  sparklePrimitive.applyEffect(container, sparkleParams);
+}
+```
+
+#### パラメータ同期チェックリスト
+
+プリミティブパラメータ追加時は以下を確認：
+
+**1. プリミティブ側の更新**
+- [ ] プリミティブのParamsインターフェースに新パラメータ追加
+- [ ] プリミティブ内で新パラメータを適切に処理
+
+**2. テンプレート側の更新**
+- [ ] getParameterConfig()に新パラメータ設定を追加
+- [ ] プリミティブ呼び出し箇所で新パラメータを渡している
+
+**3. 型システムの更新**
+- [ ] StandardParameters.tsに新パラメータ追加（標準パラメータの場合）
+- [ ] ParameterRegistry.tsに新パラメータ登録
+
+**4. 動作確認**
+- [ ] `npm run validate-parameters` が成功する
+- [ ] UI上で新パラメータが正しく表示・制御できる
+- [ ] 新パラメータが実際に効果として反映される
+
+#### 実装事例: SparkleEffect Twinkle機能
+
+```typescript
+// PurePrimitiveWordSlideText.ts 内の実装例
+private applySparkleEffectAfterLayout(
+  container: PIXI.Container,
+  text: string,
+  params: Record<string, unknown>,
+  // ... 他のパラメータ
+): void {
+  const sparkleParams: SparkleEffectParams = {
+    // 既存の必須パラメータ
+    enableSparkle: (params.enableSparkle as boolean !== false), 
+    sparkleCount: params.sparkleCount as number || 4,
+    sparkleSize: params.sparkleSize as number || 20,
+    // ... 他の既存パラメータ
+    
+    // 新機能パラメータ群（追加時に忘れやすい）
+    enableTwinkle: params.enableTwinkle as boolean || false,
+    twinkleFrequency: params.twinkleFrequency as number || 0.5,
+    twinkleBrightness: params.twinkleBrightness as number || 2.5,
+    twinkleDuration: params.twinkleDuration as number || 100,
+    twinkleProbability: params.twinkleProbability as number || 0.3,
+  };
+  
+  sparklePrimitive.applyEffect(container, sparkleParams);
+}
+```
+
+**重要**: TypeScript型システムを活用し、`SparkleEffectParams`のような型注釈を使用することで、パラメータ漏れを早期発見できます。
 
 ---
 
@@ -1119,6 +1326,153 @@ private applyRotationEffect(container: PIXI.Container, nowMs: number, params: St
   container.rotation = Math.sin(time * Math.PI * 2) * maxRotation;
 }
 ```
+
+### パーティクルエフェクトの実装（v0.5.0新機能）
+
+**SparkleEffectPrimitive**を使用したキラキラパーティクルエフェクトの実装：
+
+```typescript
+import { SparkleEffectPrimitive, type SparkleEffectParams } from '../primitives';
+
+// パーティクルエフェクトプリミティブのインスタンス
+private sparkleEffectPrimitive = new SparkleEffectPrimitive();
+
+// 文字レベルでのパーティクルエフェクト適用
+private applySparkleEffect(
+  container: PIXI.Container, 
+  text: string,
+  params: StandardParameters, 
+  nowMs: number, 
+  startMs: number, 
+  endMs: number, 
+  charIndex: number,
+  phraseEndMs?: number
+): void {
+  // パーティクルエフェクトが有効でない場合は処理をスキップ
+  if (!this.getParam(params, 'enableSparkle', false)) {
+    return;
+  }
+  
+  // グローバル座標を取得（パーティクル生成に必要）
+  const globalPos = container.getGlobalPosition();
+  
+  // SparkleEffectParamsを構築
+  const sparkleParams: SparkleEffectParams = {
+    // 基本パラメータ
+    enableSparkle: true,
+    sparkleCount: this.getParam(params, 'sparkleCount', 4),
+    sparkleSize: this.getParam(params, 'sparkleSize', 20),
+    sparkleColor: this.getParam(params, 'sparkleColor', '#FFD700'),
+    sparkleStarSpikes: this.getParam(params, 'sparkleStarSpikes', 5),
+    sparkleScale: this.getParam(params, 'sparkleScale', 3.0),
+    sparkleDuration: this.getParam(params, 'sparkleDuration', 1000),
+    sparkleRadius: this.getParam(params, 'sparkleRadius', 30),
+    sparkleAnimationSpeed: this.getParam(params, 'sparkleAnimationSpeed', 1.0),
+    sparkleAlphaDecay: this.getParam(params, 'sparkleAlphaDecay', 0.98),
+    sparkleRotationSpeed: this.getParam(params, 'sparkleRotationSpeed', 0.3),
+    sparkleGenerationRate: this.getParam(params, 'sparkleGenerationRate', 2.0),
+    sparkleVelocityCoefficient: this.getParam(params, 'sparkleVelocityCoefficient', 1.0),
+    
+    // Twinkle効果（v0.5.1）- パーティクルの瞬き効果
+    enableTwinkle: this.getParam(params, 'enableTwinkle', true),
+    twinkleFrequency: this.getParam(params, 'twinkleFrequency', 1.0),
+    twinkleDuration: this.getParam(params, 'twinkleDuration', 120),
+    twinkleProbability: this.getParam(params, 'twinkleProbability', 0.8),
+    
+    // パーティクル専用グローエフェクト
+    enableParticleGlow: this.getParam(params, 'enableParticleGlow', false),
+    particleGlowStrength: this.getParam(params, 'particleGlowStrength', 1.2),
+    particleGlowBrightness: this.getParam(params, 'particleGlowBrightness', 1.1),
+    particleGlowBlur: this.getParam(params, 'particleGlowBlur', 4),
+    particleGlowQuality: this.getParam(params, 'particleGlowQuality', 6),
+    particleGlowThreshold: this.getParam(params, 'particleGlowThreshold', 0.1),
+    
+    // システムパラメータ
+    nowMs,
+    startMs,
+    endMs,
+    phraseEndMs,
+    tailTime: 500, // パーティクル継続時間
+    text,
+    globalPosition: globalPos,
+    charId: `phrase_${params.phraseId || 'unknown'}_word_${params.wordId || 'unknown'}_char_${charIndex}`,
+    outputResolutionScale: 1.0 // 通常表示時は1.0、動画出力時は自動調整
+  };
+  
+  // パーティクルエフェクトを適用
+  this.sparkleEffectPrimitive.applyEffect(container, sparkleParams);
+}
+
+// テンプレート内での使用例（renderCharContainerメソッド内）
+renderCharContainer(
+  container: PIXI.Container,
+  text: string,
+  params: Record<string, unknown>,
+  nowMs: number,
+  startMs: number,
+  endMs: number,
+  phase: AnimationPhase
+): boolean {
+  // 通常のテキスト描画処理
+  // ...
+
+  // パーティクルエフェクトを適用
+  this.applySparkleEffect(
+    container, 
+    text, 
+    params, 
+    nowMs, 
+    startMs, 
+    endMs, 
+    params.charIndex as number || 0,
+    params.phraseEndMs as number
+  );
+  
+  return true;
+}
+```
+
+#### パーティクルエフェクト用パラメータ設定
+
+パラメータ設定で以下のスパークルエフェクト関連パラメータを追加：
+
+```typescript
+getParameterConfig(): ParameterConfig[] {
+  return [
+    // 基本パーティクルパラメータ
+    { name: "enableSparkle", type: "boolean", default: false, description: "キラキラエフェクトの有効化" },
+    { name: "sparkleCount", type: "number", default: 4, min: 1, max: 20, step: 1, description: "同時生成パーティクル数" },
+    { name: "sparkleSize", type: "number", default: 20, min: 4, max: 30, step: 2, description: "パーティクルサイズ(px)" },
+    { name: "sparkleColor", type: "color", default: "#FFD700", description: "パーティクルカラー" },
+    { name: "sparkleStarSpikes", type: "number", default: 5, min: 3, max: 12, step: 1, description: "星型の角数" },
+    { name: "sparkleDuration", type: "number", default: 1000, min: 500, max: 3000, step: 100, description: "パーティクル寿命(ms)" },
+    { name: "sparkleRadius", type: "number", default: 30, min: 5, max: 100, step: 5, description: "散布半径(px)" },
+    { name: "sparkleRotationSpeed", type: "number", default: 0.3, min: 0.0, max: 2.0, step: 0.1, description: "回転速度" },
+    { name: "sparkleGenerationRate", type: "number", default: 2.0, min: 0.5, max: 10.0, step: 0.5, description: "1秒間の生成数" },
+    
+    // Twinkle効果パラメータ（v0.5.1）
+    { name: "enableTwinkle", type: "boolean", default: true, description: "パーティクル瞬き効果の有効化" },
+    { name: "twinkleFrequency", type: "number", default: 1.0, min: 0.1, max: 5.0, step: 0.1, description: "瞬きの頻度（回/秒）" },
+    { name: "twinkleDuration", type: "number", default: 120, min: 50, max: 500, step: 10, description: "瞬きの持続時間（ms）" },
+    { name: "twinkleProbability", type: "number", default: 0.8, min: 0.0, max: 1.0, step: 0.1, description: "瞬きの確率" },
+    
+    // パーティクルグローエフェクト
+    { name: "enableParticleGlow", type: "boolean", default: false, description: "パーティクルグロー効果" },
+    { name: "particleGlowStrength", type: "number", default: 1.2, min: 0.1, max: 5.0, step: 0.1, description: "グロー強度" },
+    { name: "particleGlowBlur", type: "number", default: 4, min: 1, max: 20, step: 1, description: "グローブラー量" },
+    
+    // その他の標準パラメータ...
+  ];
+}
+```
+
+#### 重要な注意点
+
+1. **ステージレベル管理**: SparkleEffectPrimitiveは文字コンテナから独立してパーティクルを管理します
+2. **決定論的動作**: タイムライン操作時に完全に再現可能なパーティクル表示
+3. **メモリ管理**: パーティクルは自動的に寿命管理され、メモリリークを防ぎます
+4. **パフォーマンス**: 大量のパーティクルでも滑らかな動作を保証
+5. **グローバル座標**: `container.getGlobalPosition()`で取得した座標をパーティクル生成に使用
 
 ---
 
