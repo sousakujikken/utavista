@@ -181,8 +181,23 @@ export class FontService {
 
     const fontFamilies: FontFamily[] = [];
     
+    // Apply the same filtering logic as getAvailableFonts()
+    const showAllFonts = this.getShowAllFonts();
+    
+    let fontsToShow: string[];
+    if (showAllFonts || this.pickedFonts.size === 0) {
+      fontsToShow = this.validatedFonts;
+    } else {
+      fontsToShow = this.validatedFonts.filter(font => this.pickedFonts.has(font));
+    }
+    
+    if (fontsToShow.length === 0) {
+      console.warn('[FontService] No fonts available after filtering');
+      return [];
+    }
+    
     // 検証済みフォントのみを対象とする
-    this.validatedFonts.forEach(fontFamily => {
+    fontsToShow.forEach(fontFamily => {
       const fontInfos = this.fontFamilyMap.get(fontFamily);
       if (fontInfos && fontInfos.length > 0) {
         const styles: FontStyle[] = fontInfos.map(font => ({

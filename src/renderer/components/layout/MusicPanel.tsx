@@ -167,9 +167,6 @@ const MusicPanel: React.FC<MusicPanelProps> = ({ engine }) => {
                 setTimeout(() => {
                   log.debug(`[${clickTimestamp}] 音楽読み込み完了イベントを発火`);
                   const actualFilePath = electronMediaManager.getCurrentAudioFilePath();
-                    filePath: actualFilePath,
-                    fileName: fileName
-                  });
                   const audioLoadEvent = new CustomEvent('music-file-loaded', {
                     detail: { 
                       filePath: actualFilePath,

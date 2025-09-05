@@ -80,20 +80,24 @@ export interface TemplateMetadata {
   sourceUrl?: string;            // ソースコードURL（GitHubなど）
 }
 
+// パラメータ設定の型定義
+export type ParameterConfig = {
+  name: string;
+  type: 'number' | 'string' | 'color' | 'select' | 'boolean' | 'font';
+  default: any;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[] | (() => string[]);
+  label?: string;
+};
+
 export interface IAnimationTemplate {
   // テンプレートメタデータ
   metadata?: TemplateMetadata;
   
   // パラメータ設定を取得するメソッド
-  getParameterConfig?(): Array<{
-    name: string;
-    type: 'number' | 'string' | 'color' | 'select' | 'boolean';
-    default: any;
-    min?: number;
-    max?: number;
-    step?: number;
-    options?: string[] | (() => string[]);
-  }>;
+  getParameterConfig?(): ParameterConfig[];
   
   // MultiLineText/GlitchText用のヘルパーメソッド
   getOrCalculateLineNumber?(
@@ -196,6 +200,10 @@ export interface IAnimationTemplate {
     container: PIXI.Container
   ): void;
 
+  // テンプレートの内部状態をクリーンアップするメソッド
+  // テンプレート切り替え時に呼び出される
+  cleanup?(): void;
+
   // 階層ごとのレンダリングメソッド
   renderPhraseContainer?(
     container: PIXI.Container,
@@ -293,6 +301,7 @@ export interface BackgroundConfig {
   videoFilePath?: string;
   fitMode?: BackgroundFitMode;
   opacity?: number;
+  videoLoop?: boolean; // 背景動画のループ再生オプション
 }
 
 // 動画出力関連の型定義

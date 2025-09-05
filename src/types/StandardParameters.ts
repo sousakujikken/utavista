@@ -73,6 +73,23 @@ export interface StandardParameters {
   randomRangeY?: number;
   minDistanceFromPrevious?: number;
   
+  // WordSlideText2用（文字スケーリング）
+  enableCharScaling?: boolean;
+  charScaleMultiplier?: number;
+  charPositionOffsetX?: number;
+  charPositionOffsetY?: number;
+  charScalingSeed?: number;
+  
+  // WordSlideText2用（退場アニメーション）
+  enableExitAnimation?: boolean;
+  exitCopyCount?: number;
+  exitFrameDelay?: number;
+  exitCopyScale?: number;
+  exitCopyColor?: string;
+  exitAnimationDuration?: number;
+  copyPositionRandomRange?: number;
+  copyPositionSeed?: number;
+  
   // MultiLineText固有の色設定
   inactiveColor?: string;
   activeColor?: string;
@@ -102,6 +119,41 @@ export interface StandardParameters {
   glitchThreshold?: number;
   glitchWaveSpeed?: number;
   glitchRandomness?: number;
+  
+  // SparkleEffect固有のパラメータ
+  enableSparkle?: boolean;
+  sparkleCount?: number;
+  sparkleSize?: number;
+  sparkleColor?: string;
+  sparkleStarSpikes?: number;
+  sparkleScale?: number;
+  sparkleDuration?: number;
+  sparkleRadius?: number;
+  sparkleAnimationSpeed?: number;
+  sparkleAlphaDecay?: number;
+  sparkleRotationSpeed?: number;
+  sparkleGenerationRate?: number;
+  sparkleVelocityCoefficient?: number;
+  
+  // パーティクルグローエフェクトパラメータ
+  enableParticleGlow?: boolean;
+  particleGlowStrength?: number;
+  particleGlowBrightness?: number;
+  particleGlowBlur?: number;
+  particleGlowQuality?: number;
+  particleGlowThreshold?: number;
+  
+  // パーティクル瞬きエフェクトパラメータ
+  enableTwinkle?: boolean;
+  twinkleFrequency?: number;
+  twinkleBrightness?: number;
+  twinkleDuration?: number;
+  twinkleProbability?: number;
+  
+  // パーティクルサイズ縮小エフェクトパラメータ
+  enableSizeShrink?: boolean;
+  sizeShrinkRate?: number;
+  sizeShrinkRandomRange?: number;
 }
 
 /**
@@ -117,7 +169,7 @@ export const DEFAULT_PARAMETERS: StandardParameters = {
   
   // レイアウト
   letterSpacing: 0,
-  lineHeight: 150,
+  lineHeight: 1.2,  // 倍率に修正（150px絶対値から1.2倍率に変更）
   offsetX: 0,
   offsetY: 0,
   
@@ -153,7 +205,7 @@ export const DEFAULT_PARAMETERS: StandardParameters = {
   charSpacing: 1.0,
   
   totalLines: 4,
-  lineSpacing: 150,
+  lineSpacing: 1.2,  // 倍率に修正（150px絶対値から1.2倍率に変更）
   resetInterval: 2000,
   manualLineNumber: -1,
   phraseOverlapThreshold: 1000,
@@ -201,5 +253,57 @@ export const DEFAULT_PARAMETERS: StandardParameters = {
   glitchColorShift: true,
   glitchThreshold: 0.3,
   glitchWaveSpeed: 2.0,
-  glitchRandomness: 0.5
+  glitchRandomness: 0.5,
+  
+  // WordSlideText2用デフォルト値（文字スケーリング）
+  enableCharScaling: true,
+  charScaleMultiplier: 8.0,
+  charPositionOffsetX: 20,
+  charPositionOffsetY: 100,
+  charScalingSeed: 12345,
+  
+  // WordSlideText2用デフォルト値（退場アニメーション）
+  enableExitAnimation: true,
+  exitCopyCount: 3,
+  exitFrameDelay: 3,
+  exitCopyScale: 2.0,
+  exitCopyColor: '#FFFFFF',
+  exitAnimationDuration: 10,
+  copyPositionRandomRange: 50,
+  copyPositionSeed: 54321,
+  
+  // SparkleEffect用デフォルト値
+  enableSparkle: false,
+  sparkleCount: 3,
+  sparkleSize: 20,
+  sparkleColor: '#FFD700',
+  sparkleStarSpikes: 5,
+  sparkleScale: 1.0,
+  sparkleDuration: 1500,
+  sparkleRadius: 30,
+  sparkleAnimationSpeed: 1.0,
+  sparkleAlphaDecay: 0.98,
+  sparkleRotationSpeed: 0.3,
+  sparkleGenerationRate: 2.0,
+  sparkleVelocityCoefficient: 1.0,
+  
+  // パーティクルグローエフェクト用デフォルト値
+  enableParticleGlow: false,
+  particleGlowStrength: 1.2,
+  particleGlowBrightness: 1.1,
+  particleGlowBlur: 4,
+  particleGlowQuality: 6,
+  particleGlowThreshold: 0.1,
+  
+  // パーティクル瞬きエフェクト用デフォルト値
+  enableTwinkle: false,
+  twinkleFrequency: 0.5,
+  twinkleBrightness: 2.5,
+  twinkleDuration: 100,
+  twinkleProbability: 0.3,
+  
+  // パーティクルサイズ縮小エフェクト用デフォルト値
+  enableSizeShrink: false,
+  sizeShrinkRate: 1.0,
+  sizeShrinkRandomRange: 0.0
 };

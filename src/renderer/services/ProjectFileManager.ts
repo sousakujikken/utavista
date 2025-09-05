@@ -6,6 +6,7 @@ import { DebugEventBus } from '../utils/DebugEventBus';
 import { calculateCharacterIndices } from '../utils/characterIndexCalculator';
 import { StandardParameters } from '../types/StandardParameters';
 import { ParameterValidator } from '../../utils/ParameterValidator';
+import { ParameterProcessor } from '../utils/ParameterProcessor';
 
 // プロジェクトファイルのメタデータ
 export interface ProjectMetadata {
@@ -45,8 +46,14 @@ export interface ValidationResult {
 
 /**
  * プロジェクトファイルの管理を行うクラス
+ * 
+ * バージョン管理について:
+ * - CURRENT_VERSION: プロジェクトファイル形式のバージョン（パッケージバージョンとは独立）
+ * - ファイル形式の互換性維持のため、破壊的変更時のみ更新
+ * - パッケージバージョン（package.json）とは異なる管理体系
  */
 export class ProjectFileManager {
+  /** プロジェクトファイル形式バージョン（ファイル互換性管理用） */
   private static readonly CURRENT_VERSION = '0.1.0';
   private static readonly FILE_EXTENSION = '.uta';
   
@@ -64,12 +71,14 @@ export class ProjectFileManager {
    * パラメータを正規化するヘルパーメソッド
    */
   private normalizeParameters(params: unknown): StandardParameters {
-    // V2の圧縮形式フィールドを除外
-    const paramsToValidate = { ...params } as any;
-    delete paramsToValidate.parameterDiff;
-    delete paramsToValidate.templateId;
+    // 安全なパラメータ正規化
+    const normalizedParams = ParameterProcessor.normalizeToParameterObject(params);
     
-    const validation = ParameterValidator.validate(paramsToValidate);
+    // V2の圧縮形式フィールドを除外
+    delete normalizedParams.parameterDiff;
+    delete normalizedParams.templateId;
+    
+    const validation = ParameterValidator.validate(normalizedParams);
     if (!validation.isValid) {
       console.warn('Parameter normalization warnings:', validation.errors);
     }
@@ -347,8 +356,9 @@ export class ProjectFileManager {
                   
                   if (globalTemplate) {
                     try {
-                      // テンプレートをエンジンに適用
-                      const success = this.engine.changeTemplate(globalTemplate, projectData.globalParams || {}, globalTemplateId);
+                      // テンプレートをエンジンに適用（安全なパラメータ処理）
+                      const safeGlobalParams = ParameterProcessor.normalizeToParameterObject(projectData.globalParams || {});
+                      const success = this.engine.changeTemplate(globalTemplate, safeGlobalParams, globalTemplateId);
                       if (success) {
                       } else {
                       }

@@ -27,7 +27,7 @@ export default function Layout({
 }: LayoutProps) {
   return (
     <div className="layout">
-      <h2 className="heading">UTAVISTA v0.1.0 - カラオケ効果テスト</h2>
+      <h2 className="heading">UTAVISTA v0.4.3 - カラオケ効果テスト</h2>
       
       <p className="text-small">ファイルアップロード（未実装）</p>
       
@@ -87,7 +87,7 @@ export default function Layout({
       </div>
       
       <p className="footer-text">
-        歌詞アニメーションテスト - v0.1.0
+        歌詞アニメーションテスト - v0.4.3
       </p>
     </div>
   );

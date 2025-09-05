@@ -125,13 +125,19 @@ export class VideoExporter {
       
       try {
         // Phase 1: フレームキャプチャ（プレビュー機能活用シークアンドスナップ）
+        console.log('📸 [EXPORT_PHASE] Phase 1: フレームキャプチャ開始');
         await this.captureAllFramesWithSemaphore(options, totalFrames, width, height);
+        console.log('📸 [EXPORT_PHASE] Phase 1: フレームキャプチャ完了');
         
         // Phase 2: スモールバッチ動画作成
+        console.log('🎬 [EXPORT_PHASE] Phase 2: バッチ動画作成開始');
         const batchVideos = await this.createBatchVideos(options, totalFrames, width, height);
+        console.log('🎬 [EXPORT_PHASE] Phase 2: バッチ動画作成完了:', batchVideos.length, 'files');
         
         // Phase 3: 最終結合
+        console.log('🎯 [EXPORT_PHASE] Phase 3: 最終結合開始');
         const finalVideo = await this.composeFinalVideo(batchVideos, options);
+        console.log('🎯 [EXPORT_PHASE] Phase 3: 最終結合完了:', finalVideo);
         
         this.reportProgress({
           phase: 'finalizing',
@@ -231,14 +237,36 @@ export class VideoExporter {
         totalFrames
       );
       
-      // フレームデータの事前検証
+      // フレームデータの詳細検証（アスペクト比問題の特定）
       if (!frameData || frameData.length === 0) {
         throw new Error(`Empty frame data captured for frame ${frame}`);
       }
       
       const expectedSize = width * height * 4; // RGBA
-      if (frameData.length !== expectedSize) {
-        throw new Error(`Frame data size mismatch for frame ${frame}: expected ${expectedSize}, got ${frameData.length}`);
+      const actualSize = frameData.length;
+      const expectedAspectRatio = width / height;
+      
+      console.log(`🔍 [FRAME_VALIDATION] フレーム${frame} キャプチャ検証:`);
+      console.log(`🔍 [FRAME_VALIDATION] - 想定解像度: ${width}x${height} (${expectedAspectRatio.toFixed(3)})`);
+      console.log(`🔍 [FRAME_VALIDATION] - 想定サイズ: ${expectedSize} bytes`);
+      console.log(`🔍 [FRAME_VALIDATION] - 実際サイズ: ${actualSize} bytes`);
+      
+      if (actualSize !== expectedSize) {
+        // サイズ不一致時の詳細分析
+        const actualPixels = actualSize / 4;
+        const possibleWidth = Math.sqrt(actualPixels * expectedAspectRatio);
+        const possibleHeight = actualPixels / possibleWidth;
+        
+        console.error(`🚨 [ASPECT_RATIO_ERROR] フレーム${frame} サイズ不一致:`);
+        console.error(`🚨 [ASPECT_RATIO_ERROR] - 予想される解像度: ${possibleWidth.toFixed(0)}x${possibleHeight.toFixed(0)}`);
+        console.error(`🚨 [ASPECT_RATIO_ERROR] - 実際のピクセル数: ${actualPixels}`);
+        
+        throw new Error(`Frame data size mismatch for frame ${frame}: expected ${expectedSize}, got ${actualSize}`);
+      }
+      
+      // 定期的なアスペクト比監視（最初の数フレームで特に注意）
+      if (frame < 10 || frame % 50 === 0) {
+        console.log(`📊 [ASPECT_MONITOR] フレーム${frame} アスペクト比確認: ${width}x${height} (${expectedAspectRatio.toFixed(3)})`);
       }
       
       // キャンセルチェック（画像保存前）
@@ -323,6 +351,18 @@ export class VideoExporter {
         }
       }
       
+      console.log(`🎥 [BATCH_CREATE] バッチ${batchIndex} 作成開始:`, {
+        sessionId: this.sessionId,
+        batchIndex,
+        startFrame,
+        endFrame,
+        frameCount,
+        fps: options.fps,
+        width,
+        height,
+        videoQuality: options.videoQuality || 'medium'
+      });
+
       // エレクトロンメインプロセスでFFmpeg実行
       const batchVideoPath = await this.electronAPI.createBatchVideo({
         sessionId: this.sessionId,
@@ -334,6 +374,8 @@ export class VideoExporter {
         height,
         videoQuality: options.videoQuality || 'medium'
       });
+      
+      console.log(`🎥 [BATCH_CREATE] バッチ${batchIndex} 作成完了:`, batchVideoPath);
       
       batchVideos.push(batchVideoPath);
       
@@ -375,16 +417,88 @@ export class VideoExporter {
       }
     }
 
-    const finalVideoPath = await this.electronAPI.composeFinalVideo({
-      sessionId: this.sessionId,
-      batchVideos,
-      fileName: options.fileName,
-      includeMusicTrack: options.includeMusicTrack || false,
-      audioPath,
-      outputPath: options.outputPath // フルパスを追加
-    });
+    // 背景動画の情報を取得
+    let backgroundVideoPath: string | undefined;
+    let backgroundVideoLoop = false;
+    let totalDurationMs: number | undefined;
     
-    return finalVideoPath;
+    const backgroundVideo = this.engine.getBackgroundVideo();
+    if (backgroundVideo) {
+      // ElectronMediaManagerから背景動画のファイルパスを取得
+      backgroundVideoPath = electronMediaManager.getCurrentVideoFilePath();
+      backgroundVideoLoop = true; // 背景動画がある場合はループを有効化
+      totalDurationMs = options.endTime - options.startTime; // 動画の総時間
+      
+      console.log('🔍 [DURATION_DEBUG] 時間計算デバッグ:');
+      console.log('🔍 [DURATION_DEBUG] options.startTime:', options.startTime);
+      console.log('🔍 [DURATION_DEBUG] options.endTime:', options.endTime);
+      console.log('🔍 [DURATION_DEBUG] 計算結果 totalDurationMs:', totalDurationMs);
+      
+      // もし totalDurationMs が 0 または負の値の場合、強制的に最小値を設定
+      if (!totalDurationMs || totalDurationMs <= 0) {
+        totalDurationMs = 1000; // 最低1秒
+        console.log('🚨 [DURATION_FIX] totalDurationMs が無効だったため1秒に修正');
+      }
+      
+      console.log('🎬 Background video detected for export:', {
+        backgroundVideoPath,
+        backgroundVideoLoop,
+        totalDurationMs: totalDurationMs / 1000 + 's',
+        backgroundVideoElement: backgroundVideo ? 'Present' : 'None'
+      });
+    } else {
+      console.log('🎬 No background video detected for export');
+    }
+
+    // 出力解像度を取得
+    const { width, height } = this.resolutionManager.getResolutionSize(
+      options.aspectRatio,
+      options.orientation,
+      options.quality,
+      options.customResolution
+    );
+
+    console.log('🚀 [FINAL_COMPOSE] composeFinalVideo IPC呼び出し開始');
+    console.log('🚀 [FINAL_COMPOSE] パラメータ:', {
+      sessionId: this.sessionId,
+      batchVideosCount: batchVideos.length,
+      batchVideos: batchVideos,
+      fileName: options.fileName,
+      backgroundVideoPath,
+      backgroundVideoLoop,
+      totalDurationMs
+    });
+
+    try {
+      const finalVideoPath = await this.electronAPI.composeFinalVideo({
+        sessionId: this.sessionId,
+        batchVideos,
+        fileName: options.fileName,
+        includeMusicTrack: options.includeMusicTrack || false,
+        audioPath,
+        audioStartTime: options.startTime,
+        audioEndTime: options.endTime,
+        outputPath: options.outputPath, // フルパスを追加
+        backgroundVideoPath,
+        backgroundVideoLoop,
+        totalDurationMs,
+        outputWidth: width,
+        outputHeight: height
+      });
+      
+      console.log('🚀 [FINAL_COMPOSE] composeFinalVideo IPC呼び出し完了:', finalVideoPath);
+      return finalVideoPath;
+      
+    } catch (error) {
+      console.error('🚨 [FINAL_COMPOSE] composeFinalVideo IPC呼び出しエラー:', error);
+      console.error('🚨 [FINAL_COMPOSE] エラーの詳細:', {
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorStack: error instanceof Error ? error.stack : 'No stack trace',
+        sessionId: this.sessionId,
+        batchVideosCount: batchVideos.length
+      });
+      throw error;
+    }
   }
   
   /**

@@ -30,3 +30,12 @@ _excluded_from_github
 # Claude Code instructions
 CLAUDE.md
 
+# Old documentation
+docs/old/
+
+# Old/deprecated templates
+src/renderer/templates/old/
+
+# Claude Code settings
+.claude/
+

@@ -9,6 +9,8 @@ import { SystemFFmpegWrapper, BatchVideoOptions, ComposeFinalVideoOptions, FFmpe
 import { TempFileManager, TempSession, StorageStats } from './TempFileManager';
 import { BrowserWindow } from 'electron';
 import * as path from 'path';
+import * as fsSync from 'fs';
+import * as os from 'os';
 
 export interface VideoExportRequest {
   sessionId: string;
@@ -149,29 +151,75 @@ export class BatchVideoProcessor {
    * 最終動画結合
    */
   async composeFinalVideo(composeOptions: ComposeFinalVideoOptions): Promise<string> {
+    console.log('📍 [BatchVideoProcessor] composeFinalVideo 開始');
+    console.log('📍 [BatchVideoProcessor] options:', JSON.stringify(composeOptions, null, 2));
+    
+    // ファイル出力で確実にログを残す（動画出力先ディレクトリに保存）
+    const outputBaseDir = composeOptions.outputPath ? path.dirname(composeOptions.outputPath) : (process.env.HOME ? path.join(process.env.HOME, 'Desktop') : '/tmp');
+    const logDir = path.join(outputBaseDir, 'debug_logs');
+    
+    // ログディレクトリを作成
+    try {
+      fsSync.mkdirSync(logDir, { recursive: true });
+    } catch (error) {
+      console.warn('Failed to create log directory:', error);
+    }
+    
+    const logPath = path.join(logDir, 'batch_processor_debug.log');
+    const logMessage = `
+[${new Date().toISOString()}] BATCH PROCESSOR LOG - composeFinalVideo 開始
+SessionId: ${composeOptions.sessionId}
+BatchVideos: ${composeOptions.batchVideos.length} files
+BackgroundVideo: ${composeOptions.backgroundVideoPath || 'なし'}
+BackgroundVideoLoop: ${composeOptions.backgroundVideoLoop}
+TotalDurationMs: ${composeOptions.totalDurationMs}
+OutputWidth: ${composeOptions.outputWidth}
+OutputHeight: ${composeOptions.outputHeight}
+`;
+    fsSync.appendFileSync(logPath, logMessage);
+    
     try {
       const session = this.tempFileManager.getTempSession(composeOptions.sessionId);
       if (!session) {
+        console.error('📍 [BatchVideoProcessor] Session not found:', composeOptions.sessionId);
+        fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] エラー: Session not found: ${composeOptions.sessionId}\n`);
         throw new Error(`Session not found: ${composeOptions.sessionId}`);
       }
+      console.log('📍 [BatchVideoProcessor] Session found:', session.sessionDir);
+      fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] Session found: ${session.sessionDir}\n`);
       
       // 出力ディレクトリを使用者のデスクトップまたは指定ディレクトリに設定
       const outputDir = process.env.HOME ? path.join(process.env.HOME, 'Desktop') : session.outputDir;
       
       // outputPathが指定されていれば、それを使用するためoutputDirは無視される
+      fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] SystemFFmpegWrapper.composeFinalVideo 呼び出し開始\n`);
+      
       const finalVideoPath = await this.ffmpegWrapper.composeFinalVideo(
         composeOptions,
         session.sessionDir,
         outputDir,
         (progress) => {
+          // 背景動画処理がある場合は進捗を調整
+          let adjustedProgress = 85; // ベース進捗
+          if (composeOptions.backgroundVideoPath && composeOptions.backgroundVideoLoop) {
+            // 背景動画処理30% + 合成処理70%
+            adjustedProgress = 30 + (progress.progress || 0) * 70;
+          } else {
+            adjustedProgress = 85 + (progress.progress || 0) * 15;
+          }
+          
           this.sendProgressToRenderer({
             phase: 'composition',
-            overallProgress: 85, // ベース進捗
-            message: '最終動画を結合中...',
+            overallProgress: Math.min(adjustedProgress, 99),
+            message: composeOptions.backgroundVideoPath 
+              ? '背景動画と合成中...' 
+              : '最終動画を結合中...',
             ffmpegProgress: progress
           });
         }
       );
+      
+      fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] SystemFFmpegWrapper.composeFinalVideo 完了: ${finalVideoPath}\n`);
       
       return finalVideoPath;
       
@@ -347,5 +395,12 @@ export class BatchVideoProcessor {
    */
   getQueueSize(): number {
     return this.processingQueue.size;
+  }
+  
+  /**
+   * SystemFFmpegWrapperへのアクセサ
+   */
+  getFFmpegWrapper(): SystemFFmpegWrapper {
+    return this.ffmpegWrapper;
   }
 }
