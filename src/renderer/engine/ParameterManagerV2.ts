@@ -1,6 +1,7 @@
 import { StandardParameters, DEFAULT_PARAMETERS } from '../../types/StandardParameters';
 import { ParameterValidator } from '../../utils/ParameterValidator';
 import { templateRegistry } from '../templates/registry/templateRegistry';
+import { ParameterProcessor } from '../utils/ParameterProcessor';
 
 // 完全なパラメータセット（すべて必須）
 export type CompleteParameters = Required<StandardParameters>;
@@ -233,6 +234,23 @@ export class ParameterManagerV2 {
       params = this.phraseParameters.get(phraseId)!;
     }
     
+    // 配列が渡された場合の緊急対応
+    if (Array.isArray(updates)) {
+      console.error('[ParameterManagerV2] updateParameters: Array passed instead of parameter object');
+      console.error('[ParameterManagerV2] objectId:', objectId);
+      console.error('[ParameterManagerV2] updates:', updates);
+      console.error('[ParameterManagerV2] This indicates a bug in the calling code');
+      
+      // パラメータ設定配列の場合は変換を試みる
+      if (ParameterValidator.isParameterConfigArray(updates)) {
+        console.error('[ParameterManagerV2] Converting parameter config array to parameter object');
+        updates = ParameterValidator.convertConfigToParams(updates) as Partial<StandardParameters>;
+      } else {
+        console.error('[ParameterManagerV2] Skipping invalid update');
+        return;
+      }
+    }
+    
     // パラメータを検証
     const validation = ParameterValidator.validate(updates);
     if (!validation.isValid) {
@@ -244,6 +262,19 @@ export class ParameterManagerV2 {
     
     if (import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
     }
+    
+    // フレーズパラメータ変更時の自動個別設定有効化を無効化
+    // 注意: この自動有効化はパーティクルエフェクトなどのテンプレート内部処理で
+    // 意図しない個別設定有効化を引き起こすため無効化
+    // const isCurrentlyIndividual = this.phraseIndividualSettings.get(phraseId) || false;
+    // 
+    // if (!isCurrentlyIndividual) {
+    //   console.log(`[ParameterManagerV2] Auto-enabling individual setting for phrase: ${phraseId}`);
+    //   this.phraseIndividualSettings.set(phraseId, true);
+    //   
+    //   // 個別設定有効化の通知
+    //   this.notifyIndividualSettingChange(phraseId, true);
+    // }
     
     // 変更を通知
     this.notifyParameterChange(phraseId, params);
@@ -260,6 +291,8 @@ export class ParameterManagerV2 {
     if (!params) {
       // 未初期化の場合はデフォルトを返す
       console.warn(`ParameterManagerV2: Phrase ${phraseId} not initialized for object ${objectId}, returning defaults`);
+      console.debug(`ParameterManagerV2: 抽出されたフレーズID: "${phraseId}", オリジナルオブジェクトID: "${objectId}"`);
+      console.debug(`ParameterManagerV2: 現在初期化済みフレーズ:`, Array.from(this.phraseParameters.keys()));
       return this.createDefaultParameters();
     }
     
@@ -278,14 +311,28 @@ export class ParameterManagerV2 {
    * オブジェクトIDからフレーズIDを抽出
    */
   extractPhraseId(objectId: string): string {
-    // 文字ID: 任意の文字列_word_数字_char_数字 → フレーズIDを抽出
+    // 拡張形式の文字ID: phrase_X_word_Y_hZfW_char_N → phrase_X を抽出
+    const extendedCharPattern = /^(.+)_word_\d+_h\d+f\d+_char_\d+$/;
+    const extendedCharMatch = objectId.match(extendedCharPattern);
+    if (extendedCharMatch) {
+      return extendedCharMatch[1]; // フレーズIDを返す
+    }
+    
+    // 拡張形式の単語ID: phrase_X_word_Y_hZfW → phrase_X を抽出
+    const extendedWordPattern = /^(.+)_word_\d+_h\d+f\d+$/;
+    const extendedWordMatch = objectId.match(extendedWordPattern);
+    if (extendedWordMatch) {
+      return extendedWordMatch[1]; // フレーズIDを返す
+    }
+    
+    // 従来形式の文字ID: 任意の文字列_word_数字_char_数字 → フレーズIDを抽出
     const charPattern = /^(.+)_word_\d+_char_\d+$/;
     const charMatch = objectId.match(charPattern);
     if (charMatch) {
       return charMatch[1]; // フレーズIDを返す
     }
     
-    // 単語ID: 任意の文字列_word_数字 → フレーズIDを抽出
+    // 従来形式の単語ID: 任意の文字列_word_数字 → フレーズIDを抽出
     const wordPattern = /^(.+)_word_\d+$/;
     const wordMatch = objectId.match(wordPattern);
     if (wordMatch) {
@@ -300,13 +347,33 @@ export class ParameterManagerV2 {
    * グローバルデフォルトの更新（統一的処理）
    */
   updateGlobalDefaults(updates: Partial<StandardParameters>): void {
-    // 配列チェック（デバッグ用）
-    if (Array.isArray(updates)) {
-      console.error('ParameterManagerV2: updateGlobalDefaults に配列が渡されました:', updates);
-      return;
-    }
+    this.updateGlobalDefaultsInternal(updates, true);
+  }
+
+  /**
+   * グローバルデフォルトの更新（通知無効化版）
+   */
+  updateGlobalDefaultsSilent(updates: Partial<StandardParameters>): void {
+    this.updateGlobalDefaultsInternal(updates, false);
+  }
+
+  /**
+   * グローバルデフォルトの更新（内部実装）
+   */
+  private updateGlobalDefaultsInternal(updates: Partial<StandardParameters>, enableNotifications: boolean): void {
+    // デバッグ: 実際に何が渡されているかを確認
+    // console.log('[ParameterManagerV2] updateGlobalDefaults called with:', {
+    //   type: Array.isArray(updates) ? 'Array' : typeof updates,
+    //   length: Array.isArray(updates) ? updates.length : 'N/A',
+    //   keys: Array.isArray(updates) ? 'Array indices' : Object.keys(updates as any).slice(0, 5),
+    //   firstItem: Array.isArray(updates) ? updates[0] : 'N/A',
+    //   stackTrace: new Error().stack?.split('\n').slice(1, 4)
+    // });
     
-    const validation = ParameterValidator.validate(updates);
+    // 型安全な正規化（配列が来ることは設計上あり得ない）
+    const normalizedUpdates = ParameterProcessor.validateParameterObject(updates as Record<string, any>);
+    
+    const validation = ParameterValidator.validate(normalizedUpdates);
     if (!validation.isValid) {
       console.warn('Global defaults validation errors:', validation.errors);
       // 検証エラーがあっても、有効な値は適用する
@@ -314,7 +381,7 @@ export class ParameterManagerV2 {
     
     // 全てのパラメータを統一的に扱う（特別扱いなし）
     const validUpdates: Partial<StandardParameters> = {};
-    for (const [key, value] of Object.entries(updates)) {
+    for (const [key, value] of Object.entries(normalizedUpdates)) {
       // 明示的にundefinedでない限り、すべての値を適用（空文字も含む）
       if (value !== undefined) {
         validUpdates[key as keyof StandardParameters] = value;
@@ -322,18 +389,18 @@ export class ParameterManagerV2 {
     }
     
     if (Object.keys(validUpdates).length > 0) {
-      Object.assign(this.globalDefaults, validUpdates);
+      // 安全なオブジェクトマージ
+      this.globalDefaults = ParameterProcessor.mergeParameterObjects(this.globalDefaults, validUpdates) as CompleteParameters;
       
       // 個別設定がないフレーズのパラメータを更新
-      this.propagateGlobalChangesToNormalPhrases(validUpdates);
-    } else {
+      this.propagateGlobalChangesToNormalPhrases(validUpdates, enableNotifications);
     }
   }
   
   /**
    * グローバル変更を通常フレーズに伝播
    */
-  private propagateGlobalChangesToNormalPhrases(updates: Partial<StandardParameters>): void {
+  private propagateGlobalChangesToNormalPhrases(updates: Partial<StandardParameters>, enableNotifications: boolean = true): void {
     const normalPhraseIds: string[] = [];
     
     for (const [phraseId] of this.phraseParameters.entries()) {
@@ -354,11 +421,13 @@ export class ParameterManagerV2 {
         }
       }
       
-      // 変更通知
-      for (const phraseId of normalPhraseIds) {
-        const params = this.phraseParameters.get(phraseId);
-        if (params) {
-          this.notifyParameterChange(phraseId, params);
+      // 変更通知（有効化されている場合のみ）
+      if (enableNotifications) {
+        for (const phraseId of normalPhraseIds) {
+          const params = this.phraseParameters.get(phraseId);
+          if (params) {
+            this.notifyParameterChange(phraseId, params);
+          }
         }
       }
     }
@@ -368,7 +437,14 @@ export class ParameterManagerV2 {
    * 新規フレーズ作成時のベース値として使用
    */
   getGlobalDefaults(): CompleteParameters {
-    return JSON.parse(JSON.stringify(this.globalDefaults));
+    // 配列チェック（防御的プログラミング）
+    if (Array.isArray(this.globalDefaults)) {
+      console.error('[ParameterManagerV2] globalDefaults is an array, reinitializing');
+      this.globalDefaults = this.createDefaultParameters();
+    }
+    
+    const result = JSON.parse(JSON.stringify(this.globalDefaults));
+    return result;
   }
   
   /**
@@ -486,8 +562,12 @@ export class ParameterManagerV2 {
    */
   importCompressed(data: CompressedProjectData): void {
     
-    // グローバルデフォルトを設定
-    this.globalDefaults = { ...this.createDefaultParameters(), ...data.globalDefaults };
+    // グローバルデフォルトを安全に設定
+    const normalizedGlobalDefaults = ParameterProcessor.normalizeToParameterObject(data.globalDefaults);
+    this.globalDefaults = ParameterProcessor.mergeParameterObjects(
+      this.createDefaultParameters(), 
+      normalizedGlobalDefaults
+    ) as CompleteParameters;
     
     // 各フレーズを復元
     this.phraseParameters.clear();

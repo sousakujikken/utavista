@@ -321,6 +321,40 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
     setWordSplitModalPhrase(null);
   };
 
+  // 上の行とマージ
+  const mergeWithPreviousPhrase = (currentPhraseId: string) => {
+    const currentIndex = lyrics.findIndex(phrase => phrase.id === currentPhraseId);
+    if (currentIndex <= 0) return; // 最初の行はマージできない
+
+    const currentPhrase = lyrics[currentIndex];
+    const previousPhrase = lyrics[currentIndex - 1];
+
+    // テキストを結合（スペースで区切る）
+    const mergedText = previousPhrase.phrase + ' ' + currentPhrase.phrase;
+
+    // マージ先フレーズの時間範囲を拡張し、テキストを更新
+    const mergedPhrase: PhraseUnit = {
+      ...previousPhrase,
+      phrase: mergedText,
+      start: previousPhrase.start,
+      end: currentPhrase.end, // 終了時刻を現在の行まで拡張
+      words: [] // 新しいテキストで再構築されるため空にする
+    };
+
+    // 新しいテキストで単語・文字構造を再構築
+    const updatedMergedPhrase = updatePhraseText(mergedPhrase, mergedText);
+
+    // 歌詞配列を更新（現在の行を削除し、前の行を更新）
+    const updatedLyrics = lyrics.filter((_, index) => index !== currentIndex)
+                                 .map(phrase => 
+                                   phrase.id === previousPhrase.id ? updatedMergedPhrase : phrase
+                                 );
+
+    // 文字インデックスを再計算
+    const lyricsWithIndices = calculateCharacterIndices(updatedLyrics);
+    engine.updateLyricsData(lyricsWithIndices);
+  };
+
   // 時間フォーマット（秒単位で表示、1ms精度）
   const formatTime = (ms: number): string => {
     return (ms / 1000).toFixed(3);
@@ -341,6 +375,106 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
     }
   };
 
+  // ID初期化処理
+  const reinitializeIds = () => {
+    if (!engine) return;
+
+    try {
+      // Engineから現在の歌詞データを取得
+      const { lyrics: currentLyrics } = engine.getTimelineData();
+      
+      if (!currentLyrics || currentLyrics.length === 0) {
+        setSaveStatus('歌詞データがありません');
+        setTimeout(() => setSaveStatus(''), 3000);
+        return;
+      }
+      
+      // ディープコピーを作成
+      const lyricsWithNewIds = JSON.parse(JSON.stringify(currentLyrics));
+      
+      // すべてのIDを手動で再生成（拡張ID形式）
+      const regeneratedLyrics = lyricsWithNewIds.map((phrase: any, pi: number) => {
+        // フレーズIDを再生成
+        phrase.id = `phrase_${pi}`;
+        
+        // 単語IDを再生成（拡張形式）
+        if (phrase.words && Array.isArray(phrase.words)) {
+          phrase.words = phrase.words.map((word: any, wi: number) => {
+            // 単語の文字から半角・全角数をカウント
+            let halfWidth = 0;
+            let fullWidth = 0;
+            
+            if (word.chars && Array.isArray(word.chars)) {
+              word.chars.forEach((char: any) => {
+                if (char.char) {
+                  const code = char.char.charCodeAt(0);
+                  const isHalfWidth = (code >= 0x0020 && code <= 0x007E) || (code >= 0xFF61 && code <= 0xFF9F);
+                  if (isHalfWidth) {
+                    halfWidth++;
+                  } else {
+                    fullWidth++;
+                  }
+                }
+              });
+              
+              // 文字IDも再生成
+              word.chars = word.chars.map((char: any, ci: number) => ({
+                ...char,
+                id: `${phrase.id}_word_${wi}_h${halfWidth}f${fullWidth}_char_${ci}`
+              }));
+            }
+            
+            // 拡張ID形式で単語IDを生成
+            word.id = `${phrase.id}_word_${wi}_h${halfWidth}f${fullWidth}`;
+            
+            return word;
+          });
+        }
+        
+        return phrase;
+      });
+      
+      // 文字インデックスを再計算
+      const lyricsWithIndices = calculateCharacterIndices(regeneratedLyrics);
+      
+      // Engineに反映
+      engine.updateLyricsData(lyricsWithIndices);
+      
+      // ParameterManagerV2に新しいIDを登録
+      if (engine.parameterManager && engine.parameterManager.initializePhrase) {
+        console.log('[LyricsEditor] ParameterManagerV2に新しいIDを登録中...');
+        regeneratedLyrics.forEach((phrase: any) => {
+          console.log(`[LyricsEditor] フレーズ ${phrase.id} を初期化中...`);
+          engine.parameterManager.initializePhrase(phrase.id, engine.parameterManager.getDefaultTemplateId());
+        });
+        
+        // 登録確認
+        if (engine.parameterManager.getInitializedPhrases) {
+          const initializedPhrases = engine.parameterManager.getInitializedPhrases();
+          console.log('[LyricsEditor] 初期化済みフレーズ:', initializedPhrases);
+        }
+      }
+      
+      // 画面を更新
+      if (engine.instanceManager) {
+        engine.arrangeCharsOnStage();
+        engine.instanceManager.loadPhrases(engine.phrases, engine.charPositions);
+        engine.instanceManager.update(engine.currentTime);
+      }
+      
+      // 状態を更新
+      setLyrics(JSON.parse(JSON.stringify(engine.phrases)));
+      setSaveStatus('IDを再初期化しました（拡張形式）');
+      
+      setTimeout(() => setSaveStatus(''), 3000);
+      
+    } catch (error) {
+      console.error('[LyricsEditor] ID初期化でエラーが発生:', error);
+      setSaveStatus('ID初期化でエラーが発生しました');
+      setTimeout(() => setSaveStatus(''), 3000);
+    }
+  };
+
   // 編集入力フィールドのフォーカス
   useEffect(() => {
     if (editingCell && editInputRef.current) {
@@ -356,6 +490,13 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
         <div className="lyrics-editor-controls">
           <Button variant="primary" onClick={handleSave}>
             プロジェクトを保存
+          </Button>
+          <Button 
+            variant="warning" 
+            onClick={reinitializeIds}
+            title="フレーズ・単語・文字のIDをすべて拡張形式で初期化し直します"
+          >
+            ID初期化
           </Button>
           {saveStatus && <span className="save-status">{saveStatus}</span>}
           {onClose && (
@@ -388,7 +529,7 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
             </tr>
           </thead>
           <tbody>
-            {lyrics.map((phrase) => (
+            {lyrics.map((phrase, index) => (
               <tr key={phrase.id}>
                 <td 
                   className="editable-cell"
@@ -453,6 +594,16 @@ const LyricsEditor: React.FC<LyricsEditorProps> = ({ engine, onClose }) => {
                   >
                     単語分割
                   </Button>
+                  {index > 0 && (
+                    <Button 
+                      variant="info"
+                      size="small"
+                      onClick={() => mergeWithPreviousPhrase(phrase.id)}
+                      title="上の行とマージ"
+                    >
+                      ↑マージ
+                    </Button>
+                  )}
                   <Button 
                     variant="success"
                     size="small"

@@ -1,10 +1,10 @@
 {
   "name": "utavista",
   "private": true,
-  "version": "0.4.2",
+  "version": "0.5.1",
   "main": "dist/main/main/main.js",
   "license": "GPL-3.0",
-  "author": "UTAVISTA Project",
+  "author": "HIRO@Sousakujikken",
   "scripts": {
     "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
     "dev:renderer": "vite",
@@ -16,7 +16,16 @@
     "preview": "vite preview",
     "electron": "electron .",
     "package": "npm run build && electron-builder",
-    "package:all": "npm run build && electron-builder -mwl"
+    "package:all": "npm run build && electron-builder -mwl",
+    "validate-parameters": "node scripts/validate-parameters.js",
+    "pre-commit": "npm run validate-parameters && npm run lint",
+    "template:analyze": "tsx scripts/analyze-templates.ts",
+    "template:validate": "tsx scripts/validate-templates.ts",
+    "template:migrate": "tsx scripts/migrate-templates.ts",
+    "backup:create": "tsx scripts/backup-restore.ts create",
+    "backup:restore": "tsx scripts/backup-restore.ts restore",
+    "backup:list": "tsx scripts/backup-restore.ts list",
+    "backup:cleanup": "tsx scripts/backup-restore.ts cleanup"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.2",
@@ -48,6 +57,7 @@
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
     "globals": "^13.24.0",
+    "puppeteer": "^24.14.0",
     "rollup": "^4.24.4",
     "tsx": "^4.19.4",
     "typescript": "~5.6.3",

@@ -6,6 +6,7 @@ import TimelinePanel from './layout/TimelinePanel';
 import ContentTab from './layout/ContentTab';
 import ProjectTab from './layout/ProjectTab';
 import SettingsTab from './layout/SettingsTab';
+import DebugTab from './layout/DebugTab';
 import ZoomControls from './layout/ZoomControls';
 import SidebarTabs from './ui/SidebarTabs';
 import Engine from '../engine/Engine';
@@ -288,8 +289,8 @@ const NewLayout: React.FC<NewLayoutProps> = ({
             />
           </div>
           <div className="sidepanel-area">
-            {/* タブ切り替え実装：4タブ構成 */}
-            <SidebarTabs labels={['テンプレート', 'コンテンツ', 'プロジェクト', '設定']}>
+            {/* タブ切り替え実装：5タブ構成 */}
+            <SidebarTabs labels={['テンプレート', 'コンテンツ', 'プロジェクト', '設定', 'デバッグ']}>
               {[
                 <TemplateTab
                   key="template-tab"
@@ -304,7 +305,8 @@ const NewLayout: React.FC<NewLayoutProps> = ({
                   onLyricsEditModeToggle={() => setLyricsEditMode(true)}
                 />,
                 <ProjectTab key="project-tab" engine={engine!} />,
-                <SettingsTab key="settings-tab" engine={engine} />
+                <SettingsTab key="settings-tab" engine={engine} />,
+                <DebugTab key="debug-tab" engine={engine} debugInfo={debugInfo} timingDebugInfo={timingDebugInfo} />
               ]}
             </SidebarTabs>
           </div>

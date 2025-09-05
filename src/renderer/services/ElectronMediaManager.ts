@@ -40,36 +40,67 @@ export class ElectronMediaManager {
   // 音楽ファイルの復元機能 - 改善版
   async restoreAudioFile(originalFileName: string, savedFilePath?: string): Promise<{ audio: HTMLAudioElement; fileName: string } | null> {
     try {
+      console.log(`[ElectronMediaManager] ===== 音楽ファイル復元開始 =====`);
+      console.log(`[ElectronMediaManager] originalFileName: "${originalFileName}"`);
+      console.log(`[ElectronMediaManager] savedFilePath: "${savedFilePath}"`);
       
       // 保存されたファイルパスがある場合は直接読み込みを試行
       if (savedFilePath) {
         try {
+          console.log(`[ElectronMediaManager] 保存されたパスの存在確認中: ${savedFilePath}`);
           const fileExists = await window.electronAPI.checkFileExists(savedFilePath);
+          console.log(`[ElectronMediaManager] ファイル存在確認結果: ${fileExists}`);
           if (fileExists) {
-            return await this.loadMediaFileFromPath(savedFilePath, 'audio');
+            console.log(`[ElectronMediaManager] 保存されたパスから読み込み実行: ${savedFilePath}`);
+            const result = await this.loadMediaFileFromPath(savedFilePath, 'audio');
+            console.log(`[ElectronMediaManager] 保存されたパスからの読み込み成功: ${result?.fileName}`);
+            return result;
           } else {
-            console.warn(`ElectronMediaManager: 保存されたファイルが見つかりません: ${savedFilePath}`);
+            console.warn(`[ElectronMediaManager] 保存されたファイルが見つかりません: ${savedFilePath}`);
           }
         } catch (error) {
-          console.warn(`ElectronMediaManager: 保存されたパスからの読み込みに失敗: ${savedFilePath}`, error);
+          console.warn(`[ElectronMediaManager] 保存されたパスからの読み込みに失敗: ${savedFilePath}`, error);
         }
+      } else {
+        console.log(`[ElectronMediaManager] 保存されたファイルパスがありません`);
       }
       
       // 最近使用したファイルから同じ名前のファイルを検索
       try {
+        console.log(`[ElectronMediaManager] 最近使用したファイルから検索中...`);
         const recentFiles = await this.getRecentFiles('audio');
+        console.log(`[ElectronMediaManager] 最近使用したファイル一覧:`, recentFiles.map(f => ({
+          fileName: f.fileName,
+          filePath: f.filePath,
+          timestamp: new Date(f.timestamp).toISOString()
+        })));
+        
         const matchingFile = recentFiles.find(file => 
           file.fileName === originalFileName || file.filePath.includes(originalFileName)
         );
+        console.log(`[ElectronMediaManager] マッチングファイル検索結果:`, matchingFile ? {
+          fileName: matchingFile.fileName,
+          filePath: matchingFile.filePath,
+          matchType: matchingFile.fileName === originalFileName ? 'exact' : 'partial'
+        } : 'なし');
         
         if (matchingFile) {
+          console.log(`[ElectronMediaManager] マッチングファイルの存在確認中: ${matchingFile.filePath}`);
           const fileExists = await window.electronAPI.checkFileExists(matchingFile.filePath);
+          console.log(`[ElectronMediaManager] マッチングファイル存在確認結果: ${fileExists}`);
           if (fileExists) {
-            return await this.loadMediaFileFromPath(matchingFile.filePath, 'audio');
+            console.log(`[ElectronMediaManager] マッチングファイルから読み込み実行: ${matchingFile.filePath}`);
+            const result = await this.loadMediaFileFromPath(matchingFile.filePath, 'audio');
+            console.log(`[ElectronMediaManager] マッチングファイルからの読み込み成功: ${result.fileName}`);
+            return result;
+          } else {
+            console.warn(`[ElectronMediaManager] マッチングファイルが存在しません: ${matchingFile.filePath}`);
           }
+        } else {
+          console.log(`[ElectronMediaManager] 最近使用したファイルから一致するファイルが見つかりませんでした`);
         }
       } catch (error) {
-        console.warn(`ElectronMediaManager: 最近使用したファイルからの復元に失敗:`, error);
+        console.warn(`[ElectronMediaManager] 最近使用したファイルからの復元に失敗:`, error);
       }
       
       // ファイルが見つからない場合、ユーザーに再選択を求める（通知付き）
@@ -236,6 +267,11 @@ export class ElectronMediaManager {
       const fileName = mediaInfo.path.split('/').pop() || mediaInfo.path.split('\\').pop() || 'unknown';
       const filePath = mediaInfo.path;
       
+      console.log(`[ElectronMediaManager] ===== 新しい${type}ファイル読み込み =====`);
+      console.log(`[ElectronMediaManager] 選択されたファイルパス: "${filePath}"`);
+      console.log(`[ElectronMediaManager] ファイル名: "${fileName}"`);
+      console.log(`[ElectronMediaManager] mediaInfo:`, mediaInfo);
+      
       
       // メディア要素を作成
       const mediaElement = type === 'video' 
@@ -282,6 +318,7 @@ export class ElectronMediaManager {
             
             // 最近使用したファイルに追加（読み込み成功後）
             const recentFileType = type === 'video' ? 'backgroundVideo' : 'audio';
+            console.log(`[ElectronMediaManager] 最近使用したファイルに追加: ${recentFileType}, fileName: "${fileName}", path: "${mediaInfo.path}"`);
             await this.addToRecentFiles(recentFileType, fileName, mediaInfo.path);
             
             // 結果を返す
@@ -492,7 +529,10 @@ export class ElectronMediaManager {
         
         mediaElement.onerror = (error) => {
           console.error(`ElectronMediaManager: Recent ${type} load error:`, error);
-          reject(new Error(`Failed to load recent ${type} file: ${fileName}`));
+          console.error(`ElectronMediaManager: Failed file path: ${filePath}`);
+          console.error(`ElectronMediaManager: File URL: ${fileUrl}`);
+          console.error(`ElectronMediaManager: Media element:`, mediaElement);
+          reject(new Error(`Failed to load recent ${type} file: ${fileName} from ${filePath}`));
         };
         
         // ElectronでHTMLメディア要素を使用する場合、file://プロトコルが必要

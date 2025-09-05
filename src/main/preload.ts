@@ -57,7 +57,14 @@ const electronAPI = {
     fileName: string;
     includeMusicTrack?: boolean;
     audioPath?: string;
+    audioStartTime?: number;
+    audioEndTime?: number;
     outputPath?: string;
+    backgroundVideoPath?: string;
+    backgroundVideoLoop?: boolean;
+    totalDurationMs?: number;
+    outputWidth?: number;
+    outputHeight?: number;
   }): Promise<string> =>
     ipcRenderer.invoke('export:composeFinalVideo', options),
   

@@ -184,6 +184,7 @@ class PersistenceManager {
     console.log('PersistenceManager: Starting saveAutoSave');
     console.log('PersistenceManager: userDataPath:', this.userDataPath);
     console.log('PersistenceManager: autoSaveFilePath:', this.autoSaveFilePath);
+    console.log('[PersistenceManager] 保存する音楽ファイル情報:', data.engineState.audioInfo);
     
     // Ensure user data directory exists before writing
     try {
@@ -293,9 +294,12 @@ class PersistenceManager {
   private async loadAutoSave(): Promise<AutoSaveData | null> {
     try {
       const content = await fs.readFile(this.autoSaveFilePath, 'utf-8');
-      return JSON.parse(content);
+      const data = JSON.parse(content);
+      console.log('[PersistenceManager] 読み込んだ音楽ファイル情報:', data.engineState?.audioInfo);
+      return data;
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        console.log('[PersistenceManager] 自動保存ファイルが存在しません');
         return null; // File doesn't exist
       }
       throw error;

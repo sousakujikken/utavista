@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { IAnimationTemplate } from './types/types';
 import NewLayout from './components/NewLayout';
 import Engine from './engine/Engine';
@@ -6,6 +6,8 @@ import { getTemplateById } from './templates/registry/templateRegistry';
 import { FontService } from './services/FontService';
 import { initializeLogging } from '../config/logging';
 import testLyricsData from './data/longTestLyrics.json';
+import { ParameterProcessor } from './utils/ParameterProcessor';
+import { ParameterRegistry } from './utils/ParameterRegistry';
 import './App.css';
 
 // Initialize logging configuration
@@ -51,10 +53,12 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(60000); // デフォルト60秒（エンジンから実際の値を取得する）
-  const [selectedTemplate, setSelectedTemplate] = useState('flickerfadetemplate'); // テンプレート選択状態
+  const [selectedTemplate, setSelectedTemplate] = useState('glitchtextprimitive'); // テンプレート選択状態
   const [engineReady, setEngineReady] = useState(false); // エンジン初期化状態を追加
   const [fontServiceReady, setFontServiceReady] = useState(false); // FontService初期化状態を追加
   const [currentTemplate, setCurrentTemplate] = useState<IAnimationTemplate | null>(null); // 現在のテンプレートを状態として保持
+  const [loadedTemplateId, setLoadedTemplateId] = useState<string | null>(null); // 読み込み済みテンプレートIDを追跡
+  const loadedTemplateIdRef = useRef<string | null>(null); // イベントハンドラーでの参照用
   const [debugInfo, setDebugInfo] = useState<DebugInfo>({});
   const [timingDebugInfo, setTimingDebugInfo] = useState<TimingDebugInfo>({});// タイミングデバッグ情報
 
@@ -308,48 +312,70 @@ function App() {
   
   // テンプレート変更の処理（エンジンを再初期化せずテンプレートのみ変更）
   useEffect(() => {
-    // 初回の場合はスキップ（上記のuseEffectで初期化される）
-    if (!engineRef.current || !engineReady) {
-      return;
-    }
-    
-    
-    try {
+      // 初回の場合はスキップ（上記のuseEffectで初期化される）
+      if (!engineRef.current || !engineReady) {
+        return;
+      }
+      
+      // 既に同じテンプレートが読み込み済みの場合は処理をスキップ（重複防止）
+      if (loadedTemplateId === selectedTemplate) {
+        console.log(`[App] Template loading skipped: ${selectedTemplate} already loaded`);
+        return;
+      }
+      
+      try {
       // テンプレートレジストリから動的にテンプレートを取得
+      console.log(`[App] Loading template: ${selectedTemplate} (current loaded: ${loadedTemplateId})`);
       const template = getTemplateById(selectedTemplate);
       if (!template) {
         console.error(`Template not found: ${selectedTemplate}`);
         return;
       }
+      console.log(`[App] Template loaded successfully: ${selectedTemplate}`, template);
       
-      // テンプレートの検証
-      if (typeof template.getParameterConfig !== 'function') {
-        console.error(`Invalid template: ${selectedTemplate} must implement getParameterConfig() method`);
-        return;
-      }
       
       // 既存のパラメータを取得し、不足分をデフォルト値で補完
-      const existingParams = engineRef.current.parameterManager 
+      let existingParams = engineRef.current.parameterManager 
         ? engineRef.current.parameterManager.getGlobalDefaults() 
         : {};
       
-      // デフォルトパラメータを取得
-      const defaultParams = {};
-      const paramConfig = template.getParameterConfig();
-      paramConfig.forEach((param) => {
-        defaultParams[param.name] = param.default;
+      // 配列チェック（防御的プログラミング）
+      if (Array.isArray(existingParams)) {
+        console.error('[App] existingParams is an array, converting to empty object');
+        existingParams = {};
+      }
+      
+      // パラメータレジストリからデフォルトパラメータを取得
+      const registry = ParameterRegistry.getInstance();
+      
+      // 標準パラメータとテンプレート固有パラメータを組み合わせ
+      const standardParams: Record<string, any> = {};
+      const templateParams: Record<string, any> = {};
+      
+      const allParams = registry.getAllParameters();
+      allParams.forEach((definition, name) => {
+        if (definition.category === 'standard') {
+          standardParams[name] = definition.defaultValue;
+        } else if (definition.category === 'template-specific' && definition.templateId === selectedTemplate) {
+          templateParams[name] = definition.defaultValue;
+        }
       });
       
-      // 既存のパラメータを優先し、新しいパラメータのみデフォルト値を設定
-      const mergedParams = { ...defaultParams, ...existingParams };
+      const defaultParams = { ...standardParams, ...templateParams };
+      
+      // 既存のパラメータを正規化し、安全にマージ
+      const normalizedExistingParams = ParameterProcessor.normalizeToParameterObject(existingParams);
+      const mergedParams = ParameterProcessor.mergeParameterObjects(defaultParams, normalizedExistingParams);
       
       // エンジンのテンプレートを変更（歌詞データを保持）
       const success = engineRef.current.changeTemplate(template, mergedParams, selectedTemplate);
       if (success) {
         setCurrentTemplate(template);
+        setLoadedTemplateId(selectedTemplate); // 読み込み済みIDを更新
+        loadedTemplateIdRef.current = selectedTemplate; // refも更新
       } else {
         console.error("テンプレート変更に失敗しました");
-      }
+        }
     } catch (error) {
       console.error("テンプレート変更エラー:", error);
     }
@@ -359,35 +385,57 @@ function App() {
   useEffect(() => {
     const handleProjectLoaded = (event: CustomEvent) => {
       const { globalTemplateId } = event.detail;
-      if (globalTemplateId && globalTemplateId !== selectedTemplate) {
+      if (globalTemplateId && globalTemplateId !== loadedTemplateIdRef.current) {
+        console.log(`[App] Event: project-loaded, switching from ${loadedTemplateIdRef.current} to template: ${globalTemplateId}`);
         setSelectedTemplate(globalTemplateId);
+      } else {
+        console.log(`[App] Event: project-loaded ignored - same template: ${globalTemplateId} (current: ${loadedTemplateIdRef.current})`);
       }
     };
 
     const handleTemplateLoaded = (event: CustomEvent) => {
       const { templateId } = event.detail;
-      if (templateId && templateId !== selectedTemplate) {
+      if (templateId && templateId !== loadedTemplateIdRef.current) {
+        console.log(`[App] Event: template-loaded, switching from ${loadedTemplateIdRef.current} to template: ${templateId}`);
         setSelectedTemplate(templateId);
+      } else {
+        console.log(`[App] Event: template-loaded ignored - same template: ${templateId} (current: ${loadedTemplateIdRef.current})`);
       }
     };
 
     const handleAutoRestoreTemplateUpdated = (event: CustomEvent) => {
       const { templateId } = event.detail;
-      if (templateId && templateId !== selectedTemplate) {
+      if (templateId && templateId !== loadedTemplateIdRef.current) {
+        console.log(`[App] Event: auto-restore-template-updated, switching from ${loadedTemplateIdRef.current} to template: ${templateId}`);
         setSelectedTemplate(templateId);
+      } else {
+        console.log(`[App] Event: auto-restore-template-updated ignored - same template: ${templateId} (current: ${loadedTemplateIdRef.current})`);
+      }
+    };
+
+    const handleTemplateFallbackApplied = (event: CustomEvent) => {
+      const { originalTemplateId, fallbackTemplateId, availableTemplates } = event.detail;
+      console.warn(`[App] Template fallback applied: ${originalTemplateId} → ${fallbackTemplateId}`);
+      console.log(`[App] Available templates: ${availableTemplates.join(', ')}`);
+      
+      // フォールバックテンプレートに切り替え
+      if (fallbackTemplateId && fallbackTemplateId !== loadedTemplateIdRef.current) {
+        setSelectedTemplate(fallbackTemplateId);
       }
     };
 
     window.addEventListener('project-loaded', handleProjectLoaded as EventListener);
     window.addEventListener('template-loaded', handleTemplateLoaded as EventListener);
     window.addEventListener('auto-restore-template-updated', handleAutoRestoreTemplateUpdated as EventListener);
+    window.addEventListener('template-fallback-applied', handleTemplateFallbackApplied as EventListener);
 
     return () => {
       window.removeEventListener('project-loaded', handleProjectLoaded as EventListener);
       window.removeEventListener('template-loaded', handleTemplateLoaded as EventListener);
       window.removeEventListener('auto-restore-template-updated', handleAutoRestoreTemplateUpdated as EventListener);
+      window.removeEventListener('template-fallback-applied', handleTemplateFallbackApplied as EventListener);
     };
-  }, [selectedTemplate]);
+  }, []); // 依存配列を空にしてマウント時のみ実行
 
   // エンジンのクリーンアップ
   const cleanupEngine = () => {
@@ -412,9 +460,30 @@ function App() {
   const initEngine = async () => {
     try {
       // テンプレートレジストリから動的にテンプレートを取得
-      const template = getTemplateById(selectedTemplate);
+      let template = getTemplateById(selectedTemplate);
+      let actualTemplateId = selectedTemplate;
+      
       if (!template) {
         console.error(`Template not found: ${selectedTemplate}`);
+        
+        // フォールバック: 最初に登録されているテンプレートを使用
+        const { getFirstTemplateId, getAvailableTemplateIds } = await import('./templates/registry/templateRegistry');
+        const fallbackTemplateId = getFirstTemplateId();
+        
+        if (fallbackTemplateId) {
+          template = getTemplateById(fallbackTemplateId);
+          actualTemplateId = fallbackTemplateId;
+          console.log(`[App] Using fallback template: ${fallbackTemplateId}`);
+          setSelectedTemplate(fallbackTemplateId);
+        } else {
+          console.error('No templates available in registry');
+          setEngineReady(false);
+          return;
+        }
+      }
+      
+      if (!template) {
+        console.error('Failed to load fallback template');
         setEngineReady(false);
         return;
       }
@@ -457,8 +526,8 @@ function App() {
       
       const engineInitTimestamp = Date.now();
       
-      // PIXIエンジンの初期化
-      const engine = new Engine('canvasContainer', template, params, selectedTemplate);
+      // PIXIエンジンの初期化（実際に使用するテンプレートIDを渡す）
+      const engine = new Engine('canvasContainer', template, params, actualTemplateId);
       
       // エンジンインスタンスを保存（自動保存チェックの前に設定）
       engineRef.current = engine;
@@ -502,6 +571,8 @@ function App() {
       
       // 現在のテンプレートを設定
       setCurrentTemplate(template);
+      setLoadedTemplateId(actualTemplateId); // 初期化時にも読み込み済みIDを設定
+      loadedTemplateIdRef.current = actualTemplateId; // refも更新
       
       // エンジン初期化完了をマーク
       setEngineReady(true);
@@ -564,7 +635,7 @@ function App() {
   };
 
   // アニメーションフレーム更新処理
-  const updateFrame = () => {
+  const updateFrame = useCallback(() => {
     if (engineRef.current) {
       const currentEngineTime = engineRef.current.currentTime;
       
@@ -573,21 +644,23 @@ function App() {
       
       if (frameCountRef.current % 2 === 0 || Math.abs(currentEngineTime - lastTimeRef.current) > 100) {
         // 2フレームに1回、または100ms以上の差がある場合のみ更新
-        setCurrentTime(currentEngineTime);
+        setCurrentTime(prevTime => {
+          // 値が変わらない場合は更新をスキップ
+          if (Math.abs(prevTime - currentEngineTime) < 10) {
+            return prevTime;
+          }
+          return currentEngineTime;
+        });
         lastTimeRef.current = currentEngineTime;
       }
       
       // 注意: Engine側で終了時刻チェックが実装されたため、
-      // ここでの終了チェックは冗長になりましたが、念のため残しています
-      if (currentEngineTime >= totalDuration && isPlaying) {
-        handlePause();
-        return;
-      }
+      // ここでの終了チェックは削除（無限ループの原因を除去）
     }
     
     // 常に次のフレームをリクエスト
     animationFrameRef.current = requestAnimationFrame(updateFrame);
-  };
+  }, []); // 依存配列を空にして、ref経由で値を参照
 
   // 再生ハンドラ
   const handlePlay = () => {

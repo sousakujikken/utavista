@@ -26,7 +26,7 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
   const [videoQuality, setVideoQuality] = useState<VideoOutputQuality>('medium');
   
   // 共通状態
-  const [fps, setFps] = useState<30 | 60>(30);
+  const [fps, setFps] = useState<24 | 30 | 60>(30);
   const [useCustomRange, setUseCustomRange] = useState(false);
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(60000);
@@ -50,9 +50,64 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
   const [memoryUsage, setMemoryUsage] = useState<number | undefined>();
   const [exportError, setExportError] = useState<string | null>(null);
   const [includeDebugVisuals, setIncludeDebugVisuals] = useState(false);
+  
+  // 背景動画フレームレート関連
+  const [backgroundVideoFps, setBackgroundVideoFps] = useState<number | null>(null);
+  const [fpsRecommendation, setFpsRecommendation] = useState<string>('');
+  
   // const [useBatchProcessing, setUseBatchProcessing] = useState(false);
   // const [batchSize, setBatchSize] = useState(100);
   // const [maxConcurrency, setMaxConcurrency] = useState(2);
+
+  // 背景動画フレームレート検出
+  useEffect(() => {
+    const detectBackgroundVideoFps = async () => {
+      if (engine) {
+        const backgroundVideo = engine.getBackgroundVideo();
+        if (backgroundVideo && backgroundVideo.src) {
+          try {
+            // ElectronMediaManagerから背景動画のファイルパスを取得
+            const { electronMediaManager } = await import('../../services/ElectronMediaManager');
+            const videoFilePath = electronMediaManager.getCurrentVideoFilePath();
+            
+            if (videoFilePath) {
+              // IPCでffprobeを実行して背景動画のフレームレートを取得
+              const { getElectronAPI } = await import('../../../shared/electronAPI');
+              const electronAPI = getElectronAPI();
+              
+              if (electronAPI && electronAPI.getVideoMetadata) {
+                const metadata = await electronAPI.getVideoMetadata(videoFilePath);
+                if (metadata && metadata.frameRate) {
+                  setBackgroundVideoFps(metadata.frameRate);
+                  
+                  // フレームレート推奨を生成
+                  if (metadata.frameRate === 24) {
+                    setFpsRecommendation('背景動画は24fpsです。24fps出力を推奨します。');
+                    setFps(24); // 自動的に24fpsに設定
+                  } else if (metadata.frameRate === 30) {
+                    setFpsRecommendation('背景動画は30fpsです。30fps出力を推奨します。');
+                    setFps(30);
+                  } else if (metadata.frameRate === 60) {
+                    setFpsRecommendation('背景動画は60fpsです。60fps出力を推奨します。');
+                    setFps(60);
+                  } else {
+                    setFpsRecommendation(`背景動画は${metadata.frameRate}fpsです。最も近い標準フレームレートを選択してください。`);
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.warn('背景動画フレームレート検出に失敗:', error);
+          }
+        } else {
+          setBackgroundVideoFps(null);
+          setFpsRecommendation('');
+        }
+      }
+    };
+
+    detectBackgroundVideoFps();
+  }, [engine]); // engineが変更された時のみ実行
 
   // 楽曲の長さをエンジンから取得し、推奨設定を計算
   useEffect(() => {
@@ -458,12 +513,23 @@ const VideoExportPanel: React.FC<VideoExportPanelProps> = ({ engine, onClose }) 
             <label>フレームレート:</label>
             <select
               value={fps}
-              onChange={(e) => setFps(parseInt(e.target.value, 10) as 30 | 60)}
+              onChange={(e) => setFps(parseInt(e.target.value, 10) as 24 | 30 | 60)}
               disabled={isExporting}
             >
-              <option value="30">30 fps</option>
-              <option value="60">60 fps</option>
+              <option value="24">24 fps (映画品質)</option>
+              <option value="30">30 fps (標準)</option>
+              <option value="60">60 fps (高フレームレート)</option>
             </select>
+            {fpsRecommendation && (
+              <div className="fps-recommendation" style={{ 
+                marginTop: '4px', 
+                fontSize: '0.9em', 
+                color: backgroundVideoFps === fps ? '#4CAF50' : '#FF9800',
+                fontWeight: '500'
+              }}>
+                💡 {fpsRecommendation}
+              </div>
+            )}
           </div>
 
           <div className="input-group checkbox">

@@ -7,19 +7,29 @@ import { TemplatesJson } from './types';
 export interface TemplateRegistryEntry {
   id: string;
   name: string;
-  template: IAnimationTemplate;
+  template: IAnimationTemplate | null;
   metadata?: TemplateMetadata; // テンプレートメタデータ（レジストリレベル）
 }
 
 // JSONからテンプレートレジストリを動的に生成
 function createTemplateRegistry(): TemplateRegistryEntry[] {
   const config = templatesConfig as TemplatesJson;
-  return config.templates.map(templateConfig => ({
-    id: templateConfig.id,
-    name: templateConfig.name,
-    template: (templates as any)[templateConfig.exportName] as IAnimationTemplate,
-    metadata: undefined
-  }));
+  
+  const entries = config.templates.map(templateConfig => {
+    const TemplateClass = (templates as any)[templateConfig.exportName] as new () => IAnimationTemplate;
+    
+    // クラスをインスタンス化
+    const template = TemplateClass ? new TemplateClass() : null;
+    
+    return {
+      id: templateConfig.id,
+      name: templateConfig.name,
+      template: template,
+      metadata: undefined
+    };
+  });
+  
+  return entries;
 }
 
 // テンプレートの登録
@@ -28,7 +38,17 @@ export const templateRegistry: TemplateRegistryEntry[] = createTemplateRegistry(
 // IDからテンプレートを取得
 export function getTemplateById(id: string): IAnimationTemplate | undefined {
   const entry = templateRegistry.find(entry => entry.id === id);
-  return entry?.template;
+  return entry?.template || undefined;
+}
+
+// 最初に登録されているテンプレートIDを取得（フォールバック用）
+export function getFirstTemplateId(): string | undefined {
+  return templateRegistry.length > 0 ? templateRegistry[0].id : undefined;
+}
+
+// 利用可能なテンプレートIDの一覧を取得
+export function getAvailableTemplateIds(): string[] {
+  return templateRegistry.map(entry => entry.id);
 }
 
 // フルIDから取得（backwards compatibility）

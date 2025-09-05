@@ -171,7 +171,7 @@ export class AnimationInstance {
         
         
         // 重要: 変換行列を明示的に更新
-        if (this.container) {
+        if (this.container && !this.container.destroyed && this.container.transform) {
           try {
             this.container.updateTransform();
           } catch (error) {
@@ -200,6 +200,15 @@ export class AnimationInstance {
   // 表示期間外は非表示にする
   hideOutOfRange() {
     // 非表示のログ出力を制限（フレーズレベルのみ）
+    
+    // テンプレートのremoveVisualElementsがある場合は呼び出してクリーンアップ
+    if (this.template.removeVisualElements && typeof this.template.removeVisualElements === 'function') {
+      try {
+        this.template.removeVisualElements(this.container);
+      } catch (error) {
+        console.error(`hideOutOfRange: removeVisualElementsエラー ${this.id}:`, error);
+      }
+    }
     
     this.container.visible = false;
     this.isActive = false;
