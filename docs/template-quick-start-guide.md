@@ -2,7 +2,7 @@
 
 ## 🚨 必読: カラオケテンプレートの基本原則（重要度：高）
 
-### 🔴 CRITICAL: 拡張ID対応（v0.5.1+）
+### 🔴 CRITICAL: 拡張ID対応（v0.6.0+）
 ```typescript
 // 🚨 ALL templates using same_line modes MUST implement these methods:
 

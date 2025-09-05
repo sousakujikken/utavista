@@ -7,7 +7,7 @@ UTAVISTA v0.4.3のパラメータ管理システムは、すべてのアニメ�
 
 ## パラメータ追加時の必須手順
 
-### 🚨 CRITICAL: v0.5.1+ 拡張ID対応パラメータ
+### 🚨 CRITICAL: v0.6.0+ 拡張ID対応パラメータ
 
 ALL templates using FlexibleCumulativeLayoutPrimitive with same_line modes MUST include:
 
