@@ -422,21 +422,6 @@ the Free Software Foundation, either version 3 of the License, or
   - **MultiLineLayoutPrimitive**: 重複フレーズの自動多行配置システム
   - フレーズ間の干渉回避と動的レイアウト調整
 
-- **LLM連携機能の実装**
-  - **IntentBasedAPI**: 自然言語によるテンプレート生成支援API
-  - **PrimitiveLibrary**: プリミティブ組み合わせパターンの自動提案
-  - テンプレート開発の大幅な効率化
-
-- **安全性管理システム**
-  - **SafeCharacterManager**: 文字重複表示防止システム  
-  - **CharacterOverlapDetector**: 文字衝突検知・回避機能
-  - 高品質レンダリングの保証
-
-- **実用テンプレートの追加**
-  - **PurePrimitiveWordSlideText**: プリミティブ完全活用版単語スライド
-  - **BlackBandMaskTextPrimitive**: 高度マスクエフェクト対応黒帯テンプレート
-  - **VerticalTextTemplate**: 基本縦書きテンプレート
-
 ## 貢献
 
 プルリクエストを歓迎します。大きな変更を行う場合は、まずissueを作成して変更内容について議論してください。
