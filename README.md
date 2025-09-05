@@ -407,17 +407,35 @@ the Free Software Foundation, either version 3 of the License, or
   - ドキュメントの更新と整備
 
 ### v0.6.0 (現在のバージョン - プレベータ版)
-- **リポジトリ履歴のクリーンアップ**
-  - 53個のコミットを統合し、整理された開発履歴を実現
-  - 不要なテスト・開発ファイルの削除
-  - クリーンな開発基盤の構築
-- **ドキュメント整理**
-  - 包括的なドキュメント構成の改善
-  - テンプレート実装ガイドの充実
-  - API仕様書の統合と更新
-- **開発体制の最適化**
-  - バージョン管理システムの統一
-  - 開発ワークフローの標準化
+- **グラフィックプリミティブシステムの実装**
+  - **ShapePrimitive**: 基本図形（矩形、円形、多角形）の作成・アニメーション機能
+  - **GraphicsContainerPrimitive**: 歌詞タイミング同期対応のレイヤード描画システム
+  - 図形とテキストの統合アニメーション機能の実現
+
+- **縦書きレイアウトシステムの強化**
+  - **VerticalLayoutPrimitive**: 完全な縦書きテキスト配置システム
+  - **VerticalBlackBandTextPrimitive**: 縦書き対応黒帯マスクテンプレート
+  - 右から左・左から右の縦書き方向制御
+
+- **アニメーション制御プリミティブの拡張**
+  - **SlideAnimationPrimitive**: 物理ベーススライドアニメーション制御
+  - **MultiLineLayoutPrimitive**: 重複フレーズの自動多行配置システム
+  - フレーズ間の干渉回避と動的レイアウト調整
+
+- **LLM連携機能の実装**
+  - **IntentBasedAPI**: 自然言語によるテンプレート生成支援API
+  - **PrimitiveLibrary**: プリミティブ組み合わせパターンの自動提案
+  - テンプレート開発の大幅な効率化
+
+- **安全性管理システム**
+  - **SafeCharacterManager**: 文字重複表示防止システム  
+  - **CharacterOverlapDetector**: 文字衝突検知・回避機能
+  - 高品質レンダリングの保証
+
+- **実用テンプレートの追加**
+  - **PurePrimitiveWordSlideText**: プリミティブ完全活用版単語スライド
+  - **BlackBandMaskTextPrimitive**: 高度マスクエフェクト対応黒帯テンプレート
+  - **VerticalTextTemplate**: 基本縦書きテンプレート
 
 ## 貢献
 
