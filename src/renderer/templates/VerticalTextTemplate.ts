@@ -40,6 +40,11 @@ export class VerticalTextTemplate implements IAnimationTemplate {
     },
     contributors: []
   };
+
+  // 内部状態: 初回採用済みコンテナ、直近エフェクトハッシュ/フェーズ
+  private _adopted: WeakSet<PIXI.Container> = new WeakSet();
+  private _lastEffectHash: WeakMap<PIXI.Container, string> = new WeakMap();
+  private _lastPhase: WeakMap<PIXI.Container, AnimationPhase> = new WeakMap();
   
   /**
    * パラメータ設定
@@ -85,7 +90,7 @@ export class VerticalTextTemplate implements IAnimationTemplate {
       // レイアウト設定
       { name: "charSpacing", type: "number", default: 1.2, min: 0.1, max: 3.0, step: 0.1 },
       { name: "lineHeight", type: "number", default: 1.5, min: 0.5, max: 3.0, step: 0.1 },
-      { name: "phraseOffsetX", type: "number", default: 0, min: -500, max: 500, step: 10 },
+      { name: "phraseOffsetX", type: "number", default: 0, min: -1000, max: 1000, step: 10 },
       { name: "phraseOffsetY", type: "number", default: 0, min: -500, max: 500, step: 10 },
       
       // 句読点調整
@@ -157,7 +162,7 @@ export class VerticalTextTemplate implements IAnimationTemplate {
       if (child instanceof PIXI.Container) {
         child.destroy({ children: true });
       } else {
-        child.destroy();
+        (child as any).destroy?.();
       }
     });
   }
@@ -178,7 +183,14 @@ export class VerticalTextTemplate implements IAnimationTemplate {
     const textContent = Array.isArray(text) ? text.join('') : text;
     
     container.visible = true;
-    this.removeVisualElements!(container);
+    // 初回のみクリーンアップ（前テンプレート由来のmask/filter等を除去し、不要子要素を削除）
+    if (!this._adopted.has(container)) {
+      try {
+        this.removeVisualElements!(container);
+      } finally {
+        this._adopted.add(container);
+      }
+    }
     
     let rendered = false;
     switch (hierarchyType) {
@@ -278,12 +290,25 @@ export class VerticalTextTemplate implements IAnimationTemplate {
       }
     );
     
-    // フレーズレベルでグロー・シャドウエフェクトを適用
-    if (params.enableGlow || params.enableShadow) {
-      console.log(`[VerticalTextTemplate] フレーズレベルエフェクト適用: glow=${params.enableGlow}, shadow=${params.enableShadow}`);
-      
+    // フレーズレベルでのフィルター適用は、フェーズ/パラメータ変化時のみ実行
+    const effectHash = JSON.stringify({
+      glow: !!params.enableGlow,
+      shadow: !!params.enableShadow,
+      gs: params.glowStrength,
+      gb: params.glowBrightness,
+      gbl: params.glowBlur,
+      gq: params.glowQuality,
+      ssb: params.shadowBlur,
+      ssc: params.shadowColor,
+      ssa: params.shadowAngle,
+      ssd: params.shadowDistance,
+      ssalpha: params.shadowAlpha,
+      ssq: params.shadowQuality
+    });
+    const lastHash = this._lastEffectHash.get(container);
+    const lastPhase = this._lastPhase.get(container);
+    if ((params.enableGlow || params.enableShadow) && (effectHash !== lastHash || lastPhase !== phase)) {
       const glowPrimitive = new GlowEffectPrimitive();
-      
       glowPrimitive.applyEffect(container, {
         enableGlow: params.enableGlow as boolean || false,
         enableShadow: params.enableShadow as boolean || false,
@@ -308,9 +333,13 @@ export class VerticalTextTemplate implements IAnimationTemplate {
           shadowQuality: params.shadowQuality as number || 4
         } : undefined
       });
-      
-      console.log(`[VerticalTextTemplate] フレーズエフェクト適用完了: container.filters=${container.filters?.length || 0}`);
+      this._lastEffectHash.set(container, effectHash);
+    } else if (!params.enableGlow && !params.enableShadow) {
+      // いずれも無効化された場合はフィルタを外す
+      try { container.filters = null; container.filterArea = null as any; } catch {}
+      this._lastEffectHash.set(container, effectHash);
     }
+    this._lastPhase.set(container, phase);
     
     // 画面サイズ情報を子に渡す
     (params as any).screenWidth = screenWidth;

@@ -101,7 +101,7 @@ export class BlinkFadeTextPrimitive_v2 implements IAnimationTemplate {
       { name: "completedTextColor", type: "color", default: "#FFF7EB" },
       
       // v0.4.3標準: 画面中心からのオフセット
-      { name: "phraseOffsetX", type: "number", default: 0, min: -500, max: 500, step: 10 },
+      { name: "phraseOffsetX", type: "number", default: 0, min: -1000, max: 1000, step: 10 },
       { name: "phraseOffsetY", type: "number", default: 0, min: -500, max: 500, step: 10 },
       
       // FlexibleCumulativeLayoutPrimitive: 単語表示モード

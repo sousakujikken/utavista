@@ -160,3 +160,12 @@
   white-space: pre-wrap;
   color: var(--text-tertiary);
 }
+
+/* Warning above export button for unsupported WebCodecs configuration */
+.export-warning {
+  background-color: rgba(255, 193, 7, 0.12);
+  border: 1px solid #ffc107;
+  border-radius: var(--radius-small);
+  padding: var(--space-sm) var(--space-md);
+  color: #ffca28;
+}

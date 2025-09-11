@@ -535,19 +535,20 @@ function App() {
       // 開発用：グローバルアクセスのためにエンジンを設定
       if (process.env.NODE_ENV === 'development') {
         (window as any).__ENGINE__ = engine;
-        (window as any).__PARAMETER_TEST__ = () => {
-          // 動的にテストプログラムをインポートして実行
-          import('./engine/__tests__/ParameterConsistencyTest').then(({ runParameterTest }) => {
-            runParameterTest(
-              engine.parameterManagerV2,
-              engine.templateManager,
-              engine.instanceManager,
-              'phrase_1751341417869_k7b01lewz'
-            );
-          }).catch(error => {
-            console.error('パラメータテストの実行に失敗しました:', error);
-          });
-        };
+        // TODO: ParameterConsistencyTest が存在しないため一時的にコメントアウト
+        // (window as any).__PARAMETER_TEST__ = () => {
+        //   // 動的にテストプログラムをインポートして実行
+        //   import('./engine/__tests__/ParameterConsistencyTest').then(({ runParameterTest }) => {
+        //     runParameterTest(
+        //       engine.parameterManagerV2,
+        //       engine.templateManager,
+        //       engine.instanceManager,
+        //       'phrase_1751341417869_k7b01lewz'
+        //     );
+        //   }).catch(error => {
+        //     console.error('パラメータテストの実行に失敗しました:', error);
+        //   });
+        // };
       }
       
       // 注意：テスト歌詞のロードはしない

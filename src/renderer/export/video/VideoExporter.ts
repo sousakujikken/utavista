@@ -222,8 +222,14 @@ export class VideoExporter {
       
       
       // プレビュー機能と同じ統一シーク処理（背景動画・アニメーション一括同期）
-      this.engine.pause();
+      // すでに停止中なら余計な pause() を呼ばない（CALayer/動画サーフェスの無駄な切替を抑制）
+      if (this.engine.isRunning) {
+        this.engine.pause();
+      }
       await this.engine.seek(timeMs); // プレビューと同じシーク方式
+
+      // 背景動画はシーク後に停止状態へ（フリーズ）
+      await this.engine.freezeBackgroundVideoAt(timeMs);
       
       // シンプルなレンダリング安定化（プレビュー機能と同じ）
       await this.waitForStableRendering();
@@ -302,6 +308,10 @@ export class VideoExporter {
       if (frame % 50 === 0) {
         await this.cleanupMemory();
       }
+
+      // 小さな隙間を入れてWindowServer/GPUのサーフェス解放を促す（macOS安定化）
+      // 2〜5ms 程度なら体感速度にほぼ影響せず、クラッシュ誘発を抑止できるケースが多い
+      await new Promise(resolve => setTimeout(resolve, 3));
       
     } catch (error) {
       console.error(`Failed to capture frame ${frame + 1}:`, error);

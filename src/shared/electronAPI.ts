@@ -65,6 +65,42 @@ export interface ElectronAPI {
     usedBySession: number;
     usagePercent: number;
   }>;
+
+  // WebCodecs lockstep export
+  webcodecsStart(options: {
+    sessionId: string;
+    fileName: string;
+    fps: number;
+    width: number;
+    height: number;
+    audioPath?: string;
+    outputPath?: string; // optional full path; otherwise default behavior
+    totalFrames?: number;
+    totalDurationMs?: number;
+  }): Promise<void>;
+  webcodecsSendChunk(payload: {
+    sessionId: string;
+    data: Uint8Array; // EncodedVideoChunk data
+    isKey: boolean;
+    timestamp: number; // μs
+    duration?: number; // μs
+  }): Promise<void>;
+  webcodecsFinalize(options: { sessionId: string }): Promise<string>; // returns output path
+  webcodecsCancel(options: { sessionId: string }): Promise<void>;
+  webcodecsGetTimeline(options: { fps: number; startTimeMs: number; endTimeMs: number }): Promise<number[]>;
+
+  // Background frames extraction for lockstep
+  webcodecsExtractBgFrames(options: {
+    sessionId: string;
+    videoPath: string;
+    fps: number;
+    width: number;
+    height: number;
+    startTimeMs: number;
+    endTimeMs: number;
+    quality?: number; // 2(best)-31(worst) for JPEG
+    fitMode?: 'cover' | 'contain' | 'stretch';
+  }): Promise<{ framesDir: string; count: number }>;
   
   // Event listeners
   onExportProgress(callback: (progress: ExportProgress) => void): () => void;

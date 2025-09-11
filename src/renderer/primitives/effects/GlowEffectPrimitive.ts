@@ -77,7 +77,27 @@ export class GlowEffectPrimitive implements EffectPrimitive {
   
   private parentState: LayerState | null = null;
   private childInstructions: ChildInstruction[] = [];
-  private currentFilters: PIXI.Filter[] = [];
+  // フィルタはコンテナ単位で管理（共有状態を持たない）
+  private filtersByContainer: WeakMap<PIXI.Container, PIXI.Filter[]> = new WeakMap();
+
+  // フィルタ安全破棄のための遅延キュー（レンダー終了後に破棄）
+  private static disposalQueue: Set<PIXI.Filter> = new Set();
+  private static flushScheduled = false;
+  private static scheduleFlush(): void {
+    if (GlowEffectPrimitive.flushScheduled) return;
+    GlowEffectPrimitive.flushScheduled = true;
+    // 次フレームの頭で安全に破棄
+    PIXI.Ticker.shared.addOnce(() => {
+      try {
+        GlowEffectPrimitive.disposalQueue.forEach((f) => {
+          try { (f as any).destroy?.(); } catch {}
+        });
+      } finally {
+        GlowEffectPrimitive.disposalQueue.clear();
+        GlowEffectPrimitive.flushScheduled = false;
+      }
+    });
+  }
   
   /**
    * 上位層からの制御を受け入れ
@@ -91,7 +111,8 @@ export class GlowEffectPrimitive implements EffectPrimitive {
    * オリジナルWordSlideTextの設定を継承
    */
   applyEffect(container: PIXI.Container, params: CompositeEffectParams): void {
-    this.removeEffect(container);
+    // 既存フィルタをコンテナ単位で安全に破棄してから適用
+    this.disposeFilters(container);
     
     const filters: PIXI.Filter[] = [];
     
@@ -113,19 +134,54 @@ export class GlowEffectPrimitive implements EffectPrimitive {
     // ブレンドモードの適用
     this.applyBlendMode(container, params.blendMode);
     
-    // フィルターの設定
+    // フィルターの設定（コンテナにのみ紐づく）
     container.filters = filters.length > 0 ? filters : null;
-    this.currentFilters = filters;
+    if (filters.length > 0) {
+      this.filtersByContainer.set(container, filters);
+    } else {
+      this.filtersByContainer.delete(container);
+    }
   }
   
   /**
    * エフェクトの削除
    */
   removeEffect(container: PIXI.Container): void {
-    container.filters = null;
+    // 既存フィルタをコンテナ単位で安全に破棄
+    this.disposeFilters(container);
     container.filterArea = null;
     container.blendMode = PIXI.BLEND_MODES.NORMAL;
-    this.currentFilters = [];
+  }
+
+  /**
+   * 既存フィルタを破棄してGPUリソースを解放
+   */
+  private disposeFilters(container: PIXI.Container): void {
+    try {
+      const filtersToDispose: PIXI.Filter[] = [];
+      // コンテナに現在付いているフィルタ
+      if (container.filters && container.filters.length) {
+        filtersToDispose.push(...container.filters);
+      }
+      // 過去にこのコンテナに紐づけたフィルタ（念のため）
+      const mapped = this.filtersByContainer.get(container);
+      if (mapped && mapped.length) {
+        filtersToDispose.push(...mapped);
+      }
+
+      // まずコンテナからデタッチ
+      container.filters = null;
+      this.filtersByContainer.delete(container);
+
+      // 一意化して破棄予約
+      const seen = new Set<PIXI.Filter>();
+      for (const f of filtersToDispose) {
+        if (!f || seen.has(f)) continue;
+        seen.add(f);
+        GlowEffectPrimitive.disposalQueue.add(f);
+      }
+      GlowEffectPrimitive.scheduleFlush();
+    } catch {}
   }
   
   /**

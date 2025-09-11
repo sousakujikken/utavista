@@ -84,7 +84,7 @@ export class FlickerFadeTextPrimitive implements IAnimationTemplate {
         get options() { return FlexibleCumulativeLayoutPrimitive.getWordDisplayModeValues(); }
       },
       { name: "charSpacing", type: "number", default: 1.0, min: 0.1, max: 3.0, step: 0.1 },
-      { name: "phraseOffsetX", type: "number", default: 0, min: -500, max: 500, step: 10 },
+      { name: "phraseOffsetX", type: "number", default: 0, min: -1000, max: 1000, step: 10 },
       { name: "phraseOffsetY", type: "number", default: 0, min: -500, max: 500, step: 10 },
       
       // 段管理設定（MultiLineLayoutPrimitive）

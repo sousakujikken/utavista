@@ -89,7 +89,7 @@ export class PurePrimitiveWordSlideText implements IAnimationTemplate {
         options: ["normal", "add", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion"] },
       
       // 画面中央からのオフセット（標準仕様）
-      { name: "phraseOffsetX", type: "number", default: 0, min: -500, max: 500, step: 5 },
+      { name: "phraseOffsetX", type: "number", default: 0, min: -1000, max: 1000, step: 5 },
       { name: "phraseOffsetY", type: "number", default: 0, min: -500, max: 500, step: 5 },
       
       // 単語表示モード設定（プリミティブ側から選択肢を取得）

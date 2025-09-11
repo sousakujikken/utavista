@@ -191,15 +191,37 @@ export abstract class HierarchicalAnimationTemplate implements IAnimationTemplat
    * フィルタークリーンアップ
    */
   private cleanupFilters(container: PIXI.Container): void {
-    if (container.filters) {
-      container.filters.forEach(filter => {
-        if (filter && typeof filter.destroy === 'function') {
-          filter.destroy();
-        }
-      });
+    // レンダリング中の破棄でクラッシュしないよう、次フレームで安全にdestroy
+    const toDispose: PIXI.Filter[] = [];
+    if (container.filters && container.filters.length) {
+      toDispose.push(...container.filters);
       container.filters = null;
     }
     container.filterArea = null;
+    HierarchicalAnimationTemplate.enqueueFilterDisposal(toDispose);
+  }
+
+  // ========== 安全なフィルタ破棄のための静的ユーティリティ ==========
+  private static disposalQueue: Set<PIXI.Filter> = new Set();
+  private static flushScheduled = false;
+  private static enqueueFilterDisposal(filters: PIXI.Filter[]) {
+    for (const f of filters) {
+      if (!f) continue;
+      HierarchicalAnimationTemplate.disposalQueue.add(f);
+    }
+    if (!HierarchicalAnimationTemplate.flushScheduled) {
+      HierarchicalAnimationTemplate.flushScheduled = true;
+      PIXI.Ticker.shared.addOnce(() => {
+        try {
+          HierarchicalAnimationTemplate.disposalQueue.forEach(f => {
+            try { (f as any).destroy?.(); } catch {}
+          });
+        } finally {
+          HierarchicalAnimationTemplate.disposalQueue.clear();
+          HierarchicalAnimationTemplate.flushScheduled = false;
+        }
+      });
+    }
   }
 
   // テンプレート固有実装 (必須実装)

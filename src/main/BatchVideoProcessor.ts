@@ -41,6 +41,12 @@ export interface ProcessingProgress {
   tempStorageUsed?: number;
   message?: string;
   ffmpegProgress?: FFmpegProgress;
+  // Extended fields for step-wise progress
+  sessionId?: string;
+  stepIndex?: number; // 1-based
+  stepCount?: number;
+  stepName?: string;
+  stepProgress?: number; // 0..1 within step
 }
 
 /**
@@ -54,6 +60,12 @@ export class BatchVideoProcessor {
   private tempFileManager: TempFileManager;
   private processingQueue: Map<string, VideoExportRequest> = new Map();
   private isProcessing = false;
+  // WebCodecs lockstep session state
+  private wcWriters: Map<string, import('fs').WriteStream> = new Map();
+  private wcMeta: Map<string, { fps: number; width: number; height: number; fileName: string; audioPath?: string; outputPath?: string; h264Path: string; totalFrames?: number; totalDurationMs?: number } > = new Map();
+  private _muxStartTimes?: Map<string, number>;
+  // Lockstep plugin (native or system fallback)
+  private lockstepPlugin = require('./plugins/PluginRegistry').getLockstepPlugin();
   
   constructor() {
     this.ffmpegWrapper = new SystemFFmpegWrapper();
@@ -66,6 +78,7 @@ export class BatchVideoProcessor {
   async initialize(): Promise<boolean> {
     try {
       const ffmpegAvailable = await this.ffmpegWrapper.checkFFmpegAvailability();
+      try { await this.lockstepPlugin.initialize(); } catch (e) { console.warn('Lockstep plugin init failed; using fallback:', e); }
       
       if (!ffmpegAvailable) {
         console.error('FFmpeg is not available on this system');
@@ -79,6 +92,98 @@ export class BatchVideoProcessor {
       console.error('Failed to initialize BatchVideoProcessor:', error);
       return false;
     }
+  }
+
+  // ==============================
+  // WebCodecs lockstep export API
+  // ==============================
+
+  async webcodecsStart(options: { sessionId: string; fileName: string; fps: number; width: number; height: number; audioPath?: string; outputPath?: string; totalFrames?: number; totalDurationMs?: number }): Promise<void> {
+    const { sessionId, fileName, fps, width, height, audioPath, outputPath, totalFrames, totalDurationMs } = options;
+    const session = this.tempFileManager.getTempSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    const fs = await import('fs');
+    const path = await import('path');
+    const dir = path.join(session.sessionDir, 'webcodecs');
+    await (await import('fs/promises')).mkdir(dir, { recursive: true });
+    const h264Path = path.join(dir, 'video.h264');
+    const ws = fs.createWriteStream(h264Path);
+    this.wcWriters.set(sessionId, ws);
+    this.wcMeta.set(sessionId, { fps, width, height, fileName, audioPath, outputPath, h264Path, totalFrames, totalDurationMs });
+  }
+
+  async webcodecsAppendChunk(payload: { sessionId: string; data: Uint8Array; isKey: boolean; timestamp: number; duration?: number }): Promise<void> {
+    const { sessionId, data } = payload;
+    const ws = this.wcWriters.get(sessionId);
+    if (!ws) throw new Error(`WebCodecs writer not initialized for session ${sessionId}`);
+    return new Promise((resolve, reject) => {
+      ws.write(Buffer.from(data), (err) => err ? reject(err) : resolve());
+    });
+  }
+
+  async webcodecsFinalize(options: { sessionId: string }): Promise<string> {
+    const { sessionId } = options;
+    const meta = this.wcMeta.get(sessionId);
+    const writer = this.wcWriters.get(sessionId);
+    if (!meta || !writer) throw new Error(`WebCodecs session not found: ${sessionId}`);
+
+    await new Promise<void>((resolve) => writer.end(resolve));
+    this.wcWriters.delete(sessionId);
+
+    // Mux to MP4 (try copy first, fallback to re-encode if needed)
+    try {
+      const outPath = await this.ffmpegWrapper.muxH264Elementary({
+        h264Path: meta.h264Path,
+        outputFileName: meta.fileName,
+        fps: meta.fps,
+        width: meta.width,
+        height: meta.height,
+        audioPath: meta.audioPath,
+        outputPath: meta.outputPath,
+        totalFrames: meta.totalFrames,
+        totalDurationMs: meta.totalDurationMs
+      }, (ff) => {
+        try {
+          const totalMs = meta.totalDurationMs || 0;
+          const outMs = ff.outTimeMs || 0;
+          const stepProgress = totalMs > 0 ? Math.min(Math.max(outMs / totalMs, 0), 1) : undefined;
+          // Simple ETA per step
+          const now = Date.now();
+          if (!this._muxStartTimes) this._muxStartTimes = new Map<string, number>();
+          if (!this._muxStartTimes.has(sessionId)) this._muxStartTimes.set(sessionId, now);
+          const start = this._muxStartTimes.get(sessionId)!;
+          const elapsed = (now - start) / 1000;
+          const etaSeconds = stepProgress && stepProgress > 0 ? Math.max(0, elapsed * (1 - stepProgress) / stepProgress) : undefined;
+          const overall = stepProgress !== undefined ? 90 + stepProgress * 10 : 90;
+          this.sendProgressToRenderer({
+            phase: 'finalizing',
+            overallProgress: overall,
+            message: '最終mux処理中...',
+            ffmpegProgress: ff,
+            sessionId,
+            stepIndex: 3,
+            stepCount: 3,
+            stepName: '最終mux',
+            stepProgress,
+            timeRemaining: etaSeconds ? Math.round(etaSeconds * 1000) : undefined
+          });
+        } catch {}
+      });
+      return outPath;
+    } finally {
+      this.wcMeta.delete(sessionId);
+    }
+  }
+
+  async webcodecsCancel(options: { sessionId: string }): Promise<void> {
+    const { sessionId } = options;
+    const writer = this.wcWriters.get(sessionId);
+    if (writer) {
+      try { writer.destroy(); } catch {}
+      this.wcWriters.delete(sessionId);
+    }
+    this.wcMeta.delete(sessionId);
   }
   
   /**
@@ -402,5 +507,93 @@ OutputHeight: ${composeOptions.outputHeight}
    */
   getFFmpegWrapper(): SystemFFmpegWrapper {
     return this.ffmpegWrapper;
+  }
+
+  // Extract background frames to session/webcodecs/bg_frames
+  async webcodecsExtractBgFrames(options: {
+    sessionId: string;
+    videoPath: string;
+    fps: number;
+    width: number;
+    height: number;
+    startTimeMs: number;
+    endTimeMs: number;
+    quality?: number;
+    fitMode?: 'cover' | 'contain' | 'stretch';
+  }): Promise<{ framesDir: string; count: number }> {
+    const session = this.tempFileManager.getTempSession(options.sessionId);
+    if (!session) throw new Error(`Session not found: ${options.sessionId}`);
+    // Delegate to plugin (native or system fallback). The system plugin will internally call ffmpeg wrapper.
+    const totalMs = Math.max(0, options.endTimeMs - options.startTimeMs);
+    const startTs = Date.now();
+    this.sendProgressToRenderer({
+      phase: 'preparing',
+      overallProgress: 5,
+      message: '背景動画の事前準備を開始...',
+      sessionId: options.sessionId,
+      stepIndex: 1,
+      stepCount: 3,
+      stepName: '背景準備',
+      stepProgress: 0
+    });
+    const result = await this.lockstepPlugin.prepareBackgroundFrames({
+      sessionId: session.sessionDir,
+      videoPath: options.videoPath,
+      fps: options.fps,
+      width: options.width,
+      height: options.height,
+      startTimeMs: options.startTimeMs,
+      endTimeMs: options.endTimeMs,
+      quality: options.quality ?? 2,
+      fitMode: options.fitMode ?? 'cover',
+    }, (ff) => {
+      try {
+        const outMs = ff.outTimeMs ?? 0;
+        let stepProgress = totalMs > 0 ? Math.min(Math.max(outMs / totalMs, 0), 1) : undefined;
+        if ((stepProgress === undefined || isNaN(stepProgress)) && typeof ff.frame === 'number') {
+          const totalFramesApprox = Math.max(1, Math.ceil((totalMs / 1000) * options.fps));
+          stepProgress = Math.min(Math.max(ff.frame / totalFramesApprox, 0), 1);
+        }
+        const elapsed = (Date.now() - startTs) / 1000;
+        const etaSeconds = stepProgress && stepProgress > 0 ? Math.max(0, elapsed * (1 - stepProgress) / stepProgress) : undefined;
+        const overall = stepProgress !== undefined ? 5 + stepProgress * 5 : 5; // 5% -> 10%
+        this.sendProgressToRenderer({
+          phase: 'preparing',
+          overallProgress: overall,
+          message: '背景動画の事前準備中...',
+          ffmpegProgress: {
+            frame: ff.frame ?? 0,
+            fps: ff.fps ?? 0,
+            bitrate: '',
+            totalSize: 0,
+            outTimeMs: ff.outTimeMs ?? 0,
+            dupFrames: 0,
+            dropFrames: 0,
+            speed: 0,
+            progress: stepProgress ?? 0
+          },
+          sessionId: options.sessionId,
+          stepIndex: 1,
+          stepCount: 3,
+          stepName: '背景準備',
+          stepProgress,
+          timeRemaining: etaSeconds ? Math.round(etaSeconds * 1000) : undefined
+        });
+      } catch {}
+    });
+    return result;
+  }
+
+  // Compute lockstep timeline (timestamps per frame). Falls back to simple rounding if plugin unavailable.
+  async webcodecsGetTimeline(options: { fps: number; startTimeMs: number; endTimeMs: number }): Promise<number[]> {
+    try {
+      return await this.lockstepPlugin.computeTimeline(options);
+    } catch {
+      const { fps, startTimeMs, endTimeMs } = options;
+      const totalFrames = Math.ceil(((endTimeMs - startTimeMs) / 1000) * fps);
+      const arr: number[] = new Array(totalFrames);
+      for (let n = 0; n < totalFrames; n++) arr[n] = startTimeMs + Math.round((n * 1000) / fps);
+      return arr;
+    }
   }
 }

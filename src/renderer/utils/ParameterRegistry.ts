@@ -292,8 +292,8 @@ export class ParameterRegistry {
       type: 'number',
       category: 'standard',
       defaultValue: DEFAULT_PARAMETERS.phraseOffsetX || 0,
-      min: -500,
-      max: 500,
+      min: -1000,
+      max: 1000,
       description: '画面中央からのX座標オフセット'
     });
     
@@ -1165,6 +1165,232 @@ export class ParameterRegistry {
       min: 0.0,
       max: 5.0,
       description: '黒帯の余白幅（文字数ベース、0.1単位で調整可能）'
+    });
+
+    // 黒帯テンプレート（横書き）カラー・サイズ・エフェクト系
+    this.registerParameter({
+      name: 'blackBandColor',
+      type: 'color',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: '#000000',
+      description: '黒帯の塗り色'
+    });
+    this.registerParameter({
+      name: 'blackBandWidthRatio',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 1.2,
+      min: 1.0,
+      max: 2.0,
+      description: '黒帯の幅倍率（フレーズ幅基準）'
+    });
+    this.registerParameter({
+      name: 'blackBandHeightRatio',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 1.0,
+      min: 0.8,
+      max: 1.5,
+      description: '黒帯の高さ倍率（フォントサイズ基準）'
+    });
+    this.registerParameter({
+      name: 'invertMaskColor',
+      type: 'color',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: '#FFFFFF',
+      description: '反転マスクの色'
+    });
+    // 黒帯のグロー/シャドウ（横書き）
+    this.registerParameter({
+      name: 'enableBandGlow',
+      type: 'boolean',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: false,
+      description: '黒帯グローの有効/無効'
+    });
+    this.registerParameter({
+      name: 'enableBandShadow',
+      type: 'boolean',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: false,
+      description: '黒帯シャドウの有効/無効'
+    });
+    this.registerParameter({
+      name: 'bandGlowStrength',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 1.0,
+      min: 0.1,
+      max: 3.0,
+      description: '黒帯グロー強度'
+    });
+    this.registerParameter({
+      name: 'bandGlowBrightness',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 1.0,
+      min: 0.1,
+      max: 3.0,
+      description: '黒帯グロー明度'
+    });
+    this.registerParameter({
+      name: 'bandGlowBlur',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 10,
+      min: 1,
+      max: 50,
+      description: '黒帯グローぼかし'
+    });
+    this.registerParameter({
+      name: 'bandGlowQuality',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 4,
+      min: 1,
+      max: 10,
+      step: 1,
+      description: '黒帯グロー品質'
+    });
+    this.registerParameter({
+      name: 'bandShadowBlur',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 10,
+      min: 1,
+      max: 50,
+      description: '黒帯シャドウぼかし'
+    });
+    this.registerParameter({
+      name: 'bandShadowColor',
+      type: 'color',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: '#000000',
+      description: '黒帯シャドウ色'
+    });
+    this.registerParameter({
+      name: 'bandShadowDistance',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 5,
+      min: 0,
+      max: 50,
+      description: '黒帯シャドウ距離'
+    });
+    this.registerParameter({
+      name: 'bandShadowAngle',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 45,
+      min: 0,
+      max: 360,
+      description: '黒帯シャドウ角度'
+    });
+    this.registerParameter({
+      name: 'bandShadowAlpha',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 0.8,
+      min: 0.1,
+      max: 1.0,
+      description: '黒帯シャドウ透明度'
+    });
+    this.registerParameter({
+      name: 'bandShadowQuality',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'blackbandmasktextprimitive',
+      defaultValue: 4,
+      min: 1,
+      max: 10,
+      step: 1,
+      description: '黒帯シャドウ品質'
+    });
+
+    // 黒帯テンプレート（縦書き）: 主要カラー/エフェクト
+    this.registerParameter({
+      name: 'blackBandColor',
+      type: 'color',
+      category: 'template-specific',
+      templateId: 'verticalblackbandtextprimitive',
+      defaultValue: '#000000',
+      description: '黒帯の塗り色（縦書き）'
+    });
+    this.registerParameter({
+      name: 'blackBandWidthRatio',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'verticalblackbandtextprimitive',
+      defaultValue: 1.2,
+      min: 1.0,
+      max: 2.0,
+      description: '黒帯の幅倍率（縦書き）'
+    });
+    this.registerParameter({
+      name: 'blackBandHeightRatio',
+      type: 'number',
+      category: 'template-specific',
+      templateId: 'verticalblackbandtextprimitive',
+      defaultValue: 1.0,
+      min: 0.8,
+      max: 1.5,
+      description: '黒帯の高さ倍率（縦書き）'
+    });
+    this.registerParameter({
+      name: 'invertMaskColor',
+      type: 'color',
+      category: 'template-specific',
+      templateId: 'verticalblackbandtextprimitive',
+      defaultValue: '#FFFFFF',
+      description: '反転マスクの色（縦書き）'
+    });
+    this.registerParameter({
+      name: 'maskBlendMode',
+      type: 'select',
+      category: 'template-specific',
+      templateId: 'verticalblackbandtextprimitive',
+      defaultValue: 'difference',
+      options: ['normal', 'multiply', 'difference', 'overlay', 'screen'],
+      description: 'マスクの合成モード（縦書き）'
+    });
+    this.registerParameter({
+      name: 'enableBandGlow',
+      type: 'boolean',
+      category: 'template-specific',
+      templateId: 'verticalblackbandtextprimitive',
+      defaultValue: false,
+      description: '黒帯グローの有効/無効（縦書き）'
+    });
+    this.registerParameter({
+      name: 'enableBandShadow',
+      type: 'boolean',
+      category: 'template-specific',
+      templateId: 'verticalblackbandtextprimitive',
+      defaultValue: false,
+      description: '黒帯シャドウの有効/無効（縦書き）'
+    });
+    this.registerParameter({
+      name: 'bandShadowColor',
+      type: 'color',
+      category: 'template-specific',
+      templateId: 'verticalblackbandtextprimitive',
+      defaultValue: '#000000',
+      description: '黒帯シャドウ色（縦書き）'
     });
   }
   

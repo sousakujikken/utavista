@@ -8,6 +8,10 @@ export class ElectronVideoExporter {
   private electronAPI;
   private engine: Engine | null = null;
   private isExporting = false;
+  // Reuse offscreen RenderTexture pool across frame requests
+  private exportPoolInitialized = false;
+  private exportPoolWidth = 0;
+  private exportPoolHeight = 0;
   
   // Event handlers
   private onProgressHandler: ((progress: ExportProgress) => void) | null = null;
@@ -48,6 +52,11 @@ export class ElectronVideoExporter {
     // Export completed
     const completedCleanup = this.electronAPI.onExportCompleted((outputPath) => {
       this.isExporting = false;
+      // Cleanup export resources when export completes
+      if (this.engine && this.exportPoolInitialized) {
+        try { this.engine.cleanupExportResources(); } catch {}
+        this.exportPoolInitialized = false;
+      }
       if (this.onCompletedHandler) {
         this.onCompletedHandler(outputPath);
       }
@@ -57,6 +66,11 @@ export class ElectronVideoExporter {
     // Export error
     const errorCleanup = this.electronAPI.onExportError((error) => {
       this.isExporting = false;
+      // Cleanup export resources on error to avoid leaks
+      if (this.engine && this.exportPoolInitialized) {
+        try { this.engine.cleanupExportResources(); } catch {}
+        this.exportPoolInitialized = false;
+      }
       if (this.onErrorHandler) {
         this.onErrorHandler(error);
       }
@@ -78,16 +92,34 @@ export class ElectronVideoExporter {
     
     try {
       const { timeMs, width, height } = options;
-      
+
       // Set engine to specific time
-      this.engine.pause();
-      this.engine.seek(timeMs);
-      
-      // Allow some time for the engine to update
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
-      // Capture frame
-      const frameData = this.engine.captureFrame(width, height);
+      // Avoid redundant pause calls if already paused (prevents extra video/CALayer churn)
+      if (this.engine.isRunning) {
+        this.engine.pause();
+      }
+      await this.engine.seek(timeMs);
+
+      // 背景動画はシーク後に停止状態へ（フリーズ）
+      await this.engine.freezeBackgroundVideoAt(timeMs);
+
+      // Allow some time for the engine to update (shortened due to explicit freeze)
+      await new Promise(resolve => setTimeout(resolve, 20));
+
+      // Initialize or update offscreen RenderTexture pool (avoids renderer resize churn)
+      if (!this.exportPoolInitialized || this.exportPoolWidth !== width || this.exportPoolHeight !== height) {
+        // Cleanup previous pool if size changed
+        if (this.exportPoolInitialized) {
+          try { this.engine.cleanupExportResources(); } catch {}
+        }
+        this.engine.initializeExportResources(width, height);
+        this.exportPoolInitialized = true;
+        this.exportPoolWidth = width;
+        this.exportPoolHeight = height;
+      }
+
+      // Capture frame using offscreen pool
+      const frameData = this.engine.captureOffscreenFrame(width, height, false);
       
       // Convert Uint8Array to base64
       const base64Data = this.uint8ArrayToBase64(frameData);
@@ -141,6 +173,11 @@ export class ElectronVideoExporter {
     try {
       await this.electronAPI.cancelExport();
       this.isExporting = false;
+      // Cleanup export resources on cancel
+      if (this.engine && this.exportPoolInitialized) {
+        try { this.engine.cleanupExportResources(); } catch {}
+        this.exportPoolInitialized = false;
+      }
     } catch (error) {
       console.error('Failed to cancel export:', error);
       throw error;

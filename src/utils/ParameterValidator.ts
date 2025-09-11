@@ -1,11 +1,12 @@
 import { StandardParameters, DEFAULT_PARAMETERS } from '../types/StandardParameters';
 import { ParameterRegistry } from '../renderer/utils/ParameterRegistry';
+import type { TemplateId } from '../renderer/types/TemplateParameters';
 
 export class ParameterValidator {
   /**
    * パラメータの型と値の妥当性を検証
    */
-  static validate(params: unknown): {
+  static validate(params: unknown, templateId?: TemplateId): {
     isValid: boolean;
     errors: string[];
     sanitized: Partial<StandardParameters>;
@@ -55,9 +56,9 @@ export class ParameterValidator {
         } else {
           errors.push(`Invalid type for ${key}: expected string, got ${typeof value}`);
         }
-      } else if (registry.isRegistered(key)) {
+      } else if (registry.isRegistered(key, templateId)) {
         // レジストリに登録されたパラメータの検証
-        const validation = registry.validateParameter(key, value);
+        const validation = registry.validateParameter(key, value, templateId);
         if (validation.valid) {
           (sanitized as Record<string, unknown>)[key] = value;
         } else {

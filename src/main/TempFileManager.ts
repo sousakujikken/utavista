@@ -428,7 +428,8 @@ export class TempFileManager {
           compressionLevel: currentCompressionLevel,
           adaptiveFiltering: options.adaptiveFiltering, // 常に有効
           palette: false,  // パレットモード無効（フルカラー保証）
-          effort: 10,      // 最大エンコード努力（品質優先）
+          // effort 10 は高品質だが遅い。6 へ下げて速度とサイズのバランスを最適化。
+          effort: 6,
           force: true
         })
         .toBuffer();
