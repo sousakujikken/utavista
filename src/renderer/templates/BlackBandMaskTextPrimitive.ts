@@ -51,6 +51,8 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
     blackBandContainer: PIXI.Container;
     invertMaskContainer: PIXI.Container;
   }>();
+  // パラメータ変更検出用（黒帯サイズ/色等のハッシュ）
+  private paramSignatureMap = new Map<string, string>();
   
   readonly metadata = {
     name: "BlackBandMaskTextPrimitive",
@@ -106,7 +108,7 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
       { name: "activeColor", type: "color", default: "#FFD700" },
       
       // 画面中心からのオフセット (v0.4.3標準)
-      { name: "phraseOffsetX", type: "number", default: 0, min: -500, max: 500, step: 10 },
+      { name: "phraseOffsetX", type: "number", default: 0, min: -1000, max: 1000, step: 10 },
       { name: "phraseOffsetY", type: "number", default: 0, min: -500, max: 500, step: 10 },
       
       // 黒帯設定
@@ -206,12 +208,15 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
     
     // スワイプアウト状態のクリア
     this.swipeOutStates.clear();
+    this.paramSignatureMap.clear();
     
     // プリミティブの全状態クリーンアップ
     SparkleEffectPrimitive.cleanup();
     
     console.log('[BlackBandMaskTextPrimitive] Cleanup complete');
   }
+
+  
 
   /**
    * ビジュアル要素の削除
@@ -667,6 +672,27 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
     
     // ログ抑制: コンテナ確認OK
     
+    // パラメータ変更検出（色/サイズに影響するキー）
+    const signature = this.buildParamSignature(params);
+    const lastSig = this.paramSignatureMap.get(phraseId);
+    if (!lastSig || lastSig !== signature) {
+      // 既存黒帯があればインプレース更新（強制）
+      const existing = containers.blackBandContainer.children.find(c => c.name === `black_band_${phraseId}`) as (PIXI.Graphics & { userData?: any }) | undefined;
+      if (existing) {
+        try {
+          this.redrawBlackBand(existing, params);
+          console.log(`[BLACKBAND_SIZE_CALC] 署名変更により黒帯を更新: phraseId=${phraseId}`);
+        } catch (e) {
+          // 更新失敗時は作り直し
+          try {
+            if (existing.parent) existing.parent.removeChild(existing);
+            if (!existing.destroyed) existing.destroy({ children: true });
+          } catch {}
+        }
+      }
+      this.paramSignatureMap.set(phraseId, signature);
+    }
+
     // 純粋な時間ベース: 常に黒帯を作成（フレーズ退場まで維持）
     this.createBlackBand(containers.blackBandContainer, params, nowMs, startMs, endMs, phraseId, phraseText, phase);
     
@@ -858,12 +884,30 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
       child.name === `black_band_${phraseId}`
     );
     if (existingBlackBand) {
-      const blackBandGraphics = existingBlackBand as PIXI.Graphics;
+      const blackBandGraphics = existingBlackBand as PIXI.Graphics & { userData?: any };
       const beforeMask = blackBandGraphics.mask;
-      console.log(`[SEEK_SWIPE_DEBUG] 既存黒帯発見 - マスク管理をapplySwipeInMaskToBlackBandに委譲: phraseId=${phraseId}, beforeMask=${!!beforeMask}, maskName=${beforeMask?.name || 'none'}`);
-      
-      // 重要: マスク状態の管理は applySwipeInMaskToBlackBand に一元化
-      // ここではマスククリアを行わず、既存黒帯の存在を確認するのみ
+      console.log(`[SEEK_SWIPE_DEBUG] 既存黒帯発見 - 更新判定へ委譲: phraseId=${phraseId}, beforeMask=${!!beforeMask}, maskName=${beforeMask?.name || 'none'}`);
+
+      // 現在の望ましいサイズ・色を算出
+      const { bandWidthUpdate, bandHeightUpdate, phraseCenterOffsetUpdate, desiredColor, colorNum } = this.computeBandMetrics(params);
+
+      const prev = blackBandGraphics.userData || {};
+      const needUpdate = (
+        Math.round(prev.width || 0) !== Math.round(bandWidthUpdate) ||
+        Math.round(prev.height || 0) !== Math.round(bandHeightUpdate) ||
+        (prev.color || '').toLowerCase() !== desiredColor
+      );
+
+      if (needUpdate) {
+        // マスクを一時的に外して安全に再描画
+        this.redrawBlackBand(blackBandGraphics, params);
+      }
+
+      // 黒帯のグロー/シャドウなどのエフェクトパラメータ変更にも反応させる
+      // 既存黒帯に対してエフェクトを再適用（必要に応じて内部で置換）
+      this.applyBandGlowShadowEffect(blackBandGraphics as unknown as PIXI.Container, params);
+
+      // マスク状態の管理は applySwipeInMaskToBlackBand に一元化（以降のフレームで適用）
       return;
     }
     
@@ -892,10 +936,16 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
       alpha: 1.0
     };
     
-    const blackBand = this.shapePrimitive.createRectangle(blackBandParams);
+    const blackBand = this.shapePrimitive.createRectangle(blackBandParams) as PIXI.Graphics & { userData?: any };
     blackBand.name = `black_band_${phraseId}`;
     // シーク検出対応: 新規作成時は一時的に非表示（マスク適用まで）
     blackBand.visible = false;
+    // 後続の更新判定用メタデータ
+    blackBand.userData = {
+      width: blackBandParams.width,
+      height: blackBandParams.height,
+      color: (blackBandParams.color as string || '#000000').toLowerCase()
+    };
     
     // コンテナに追加
     blackBandContainer.addChild(blackBand);
@@ -1697,6 +1747,118 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
     
     return totalWidth;
   }
+
+  /** パラメータから黒帯サイズと色を算出 */
+  private computeBandMetrics(params: Record<string, unknown>): {
+    bandWidthUpdate: number;
+    bandHeightUpdate: number;
+    phraseCenterOffsetUpdate: number;
+    desiredColor: string;
+    colorNum: number;
+  } {
+    const fontSize = params.fontSize as number || 120;
+    const phraseWidth = this.getActualPhraseWidthFromLayout(params);
+    const marginWidth = params.blackBandMarginWidth as number || 1.0;
+    const bandHeightRatio = params.blackBandHeightRatio as number || 1.0;
+    const bandWidthUpdate = phraseWidth + (fontSize * marginWidth * 2);
+    const bandHeightUpdate = fontSize * bandHeightRatio * 1.5;
+    const phraseCenterOffsetUpdate = phraseWidth / 2;
+    const desiredColorRaw = (params.blackBandColor as any) ?? '#000000';
+    const desiredColor = typeof desiredColorRaw === 'string' ? desiredColorRaw.toLowerCase() : `#${Number(desiredColorRaw).toString(16).padStart(6,'0')}`;
+    let colorNum: number;
+    if (typeof desiredColorRaw === 'number') {
+      colorNum = desiredColorRaw as number;
+    } else if (typeof desiredColor === 'string' && desiredColor.startsWith('#')) {
+      colorNum = parseInt(desiredColor.slice(1), 16);
+    } else if (typeof desiredColor === 'string' && desiredColor.startsWith('rgb')) {
+      // rgb/rgba(r,g,b[,a]) を簡易パース
+      const m = desiredColor.match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+      if (m) {
+        const r = Math.max(0, Math.min(255, parseInt(m[1], 10)));
+        const g = Math.max(0, Math.min(255, parseInt(m[2], 10)));
+        const b = Math.max(0, Math.min(255, parseInt(m[3], 10)));
+        colorNum = (r << 16) + (g << 8) + b;
+      } else {
+        colorNum = 0x000000;
+      }
+    } else {
+      colorNum = 0x000000;
+    }
+    return { bandWidthUpdate, bandHeightUpdate, phraseCenterOffsetUpdate, desiredColor, colorNum };
+  }
+
+  /** 既存黒帯のインプレース再描画 */
+  private redrawBlackBand(blackBandGraphics: PIXI.Graphics & { userData?: any }, params: Record<string, unknown>): void {
+    const { bandWidthUpdate, bandHeightUpdate, phraseCenterOffsetUpdate, desiredColor, colorNum } = this.computeBandMetrics(params);
+    const prev = blackBandGraphics.userData || {};
+    const needUpdate = (
+      Math.round(prev.width || 0) !== Math.round(bandWidthUpdate) ||
+      Math.round(prev.height || 0) !== Math.round(bandHeightUpdate) ||
+      (prev.color || '').toLowerCase() !== desiredColor
+    );
+    if (!needUpdate) return;
+    if (blackBandGraphics.mask) blackBandGraphics.mask = null;
+    blackBandGraphics.clear();
+    const x = phraseCenterOffsetUpdate - (bandWidthUpdate / 2);
+    const y = -bandHeightUpdate / 2;
+    blackBandGraphics.beginFill(colorNum, 1.0);
+    blackBandGraphics.drawRect(x, y, bandWidthUpdate, bandHeightUpdate);
+    blackBandGraphics.endFill();
+    blackBandGraphics.userData = {
+      width: bandWidthUpdate,
+      height: bandHeightUpdate,
+      color: desiredColor
+    };
+  }
+
+  /** 視覚に影響するパラメータのシグネチャ */
+  private buildParamSignature(params: Record<string, unknown>): string {
+    const fontSize = (params.fontSize as number) ?? 120;
+    const margin = (params.blackBandMarginWidth as number) ?? 1.0;
+    const heightRatio = (params.blackBandHeightRatio as number) ?? 1.0;
+    const colorRaw = (params.blackBandColor as any) ?? '#000000';
+    const color = typeof colorRaw === 'string' ? colorRaw.toLowerCase() : `#${Number(colorRaw).toString(16).padStart(6,'0')}`;
+    const charSpacing = (params.charSpacing as number) ?? 1.0;
+    const wordSpacing = (params.wordSpacing as number) ?? 1.0;
+    // エフェクト系（黒帯グロー/シャドウ）も署名に含めて変更検出
+    const enableBandGlow = (params.enableBandGlow as boolean) ?? false;
+    const enableBandShadow = (params.enableBandShadow as boolean) ?? false;
+    const bandGlowStrength = (params.bandGlowStrength as number) ?? 1.0;
+    const bandGlowBrightness = (params.bandGlowBrightness as number) ?? 1.0;
+    const bandGlowBlur = (params.bandGlowBlur as number) ?? 10;
+    const bandGlowQuality = (params.bandGlowQuality as number) ?? 4;
+    const bandShadowBlur = (params.bandShadowBlur as number) ?? 10;
+    const bandShadowColorRaw = (params.bandShadowColor as any) ?? '#000000';
+    const bandShadowColor = typeof bandShadowColorRaw === 'string' ? bandShadowColorRaw.toLowerCase() : `#${Number(bandShadowColorRaw).toString(16).padStart(6,'0')}`;
+    const bandShadowDistance = (params.bandShadowDistance as number) ?? 5;
+    const bandShadowAngle = (params.bandShadowAngle as number) ?? 45;
+    const bandShadowAlpha = (params.bandShadowAlpha as number) ?? 0.8;
+    const bandShadowQuality = (params.bandShadowQuality as number) ?? 4;
+    const words = (params.words as any[]) || [];
+    const wordCharCounts = words.map(w => Array.isArray(w?.chars) ? w.chars.length : (typeof w?.text === 'string' ? w.text.length : 0)).join(',');
+    return [
+      `${fontSize}`,
+      `m:${margin}`,
+      `hr:${heightRatio}`,
+      `c:${color}`,
+      `cs:${charSpacing}`,
+      `ws:${wordSpacing}`,
+      `wc:${wordCharCounts}`,
+      // エフェクト系
+      `bg:${enableBandGlow?'1':'0'}`,
+      `bs:${enableBandShadow?'1':'0'}`,
+      `bgs:${bandGlowStrength}`,
+      `bgb:${bandGlowBrightness}`,
+      `bgbu:${bandGlowBlur}`,
+      `bgq:${bandGlowQuality}`,
+      `bsb:${bandShadowBlur}`,
+      `bsc:${bandShadowColor}`,
+      `bsd:${bandShadowDistance}`,
+      `bsa:${bandShadowAngle}`,
+      `bsal:${bandShadowAlpha}`,
+      `bsq:${bandShadowQuality}`
+    ].join('|');
+  }
   
   /**
    * FlexibleCumulativeLayoutPrimitiveの累積幅計算を利用
@@ -1965,9 +2127,11 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
     const phraseWidth = this.getActualPhraseWidthFromLayout(params);
     const totalSlices = Math.ceil(phraseWidth / sliceWidth);
     const phraseCenterOffset = phraseWidth / 2;
+    // 黒帯高さに合わせた十分なマスク高さ（狭すぎると文字が見えなくなる）
     const maskHeight = fontSize * 2;
 
-    // マスク領域をクリアして開始
+    // マスク領域をクリアして開始（可視化を明示的に有効化）
+    swipeMask.visible = true; // シーク復帰時に非表示のまま残る問題を防ぐ
     swipeMask.clear();
     swipeMask.beginFill(0xFFFFFF, 1.0);
 
@@ -2012,19 +2176,23 @@ export class BlackBandMaskTextPrimitive implements IAnimationTemplate {
     try {
       if (graphicsContainer.blackBandContainer && !graphicsContainer.blackBandContainer.destroyed) {
         graphicsContainer.blackBandContainer.mask = swipeMask;
+        // 黒帯コンテナは退場中も可視（マスクで隠す）
+        graphicsContainer.blackBandContainer.visible = true;
       }
     } catch (error) {
       console.warn(`[SWIPE_OUT_DEBUG] 黒帯コンテナマスク適用エラー:`, error);
     }
 
-    // 文字コンテナにも同じマスクを安全に適用
+    // 文字コンテナにも同じマスクを安全に適用（直下のword/charコンテナに限定）
     try {
       phraseContainer.children.forEach(child => {
         try {
           const isCharContainer = child && !child.destroyed && child instanceof PIXI.Container && child.name && 
                                  (child.name.includes('char_container') || child.name.includes('word_container'));
           if (isCharContainer) {
-            child.mask = swipeMask;
+            (child as PIXI.Container).mask = swipeMask;
+            // 退場中は可視状態を強制（マスクで隠すため）
+            (child as PIXI.Container).visible = true;
           }
         } catch (error) {
           // 個別の子要素でエラーが発生しても継続

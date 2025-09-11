@@ -2,16 +2,49 @@ import * as electron from 'electron';
 import type { BrowserWindow as BrowserWindowType } from 'electron';
 const { app, BrowserWindow, ipcMain } = electron;
 import * as path from 'path';
+import { initFileLogger } from './logging';
 import { setupFileHandlers } from './fileManager';
 import { setupExportHandlers } from './exportManager';
 import { fontManager } from './fontManager';
 import { persistenceManager } from './persistenceManager';
+
+// ---- Startup GPU/Compositor safety switches (must be set before app ready) ----
+// macOS 15.x + Chromium can crash WindowServer with CALayer overlays
+// under heavy surface churn (Invalid mailbox / overlay spam). Disable overlays
+// and hardware video decode to keep composition stable during export.
+try {
+  app.commandLine.appendSwitch('disable-mac-overlays');
+  app.commandLine.appendSwitch('disable-accelerated-video-decode');
+  // Reduce IOSurface/zero-copy pressure on macOS (stabilize WindowServer)
+  app.commandLine.appendSwitch('disable-gpu-memory-buffer-compositor-resources');
+  app.commandLine.appendSwitch('disable-zero-copy');
+  // Prefer Metal path for ANGLE to avoid EGL warnings on macOS
+  app.commandLine.appendSwitch('use-angle', 'metal');
+  // Keep GPU enabled for general rendering; avoid full software fallback by default.
+  // If issues persist, consider enabling one of the following as a last resort:
+  // app.disableHardwareAcceleration();
+  // app.commandLine.appendSwitch('use-gl', 'swiftshader');
+  // app.commandLine.appendSwitch('disable-gpu');
+  // Log applied switches for diagnostics
+  // Note: process.argv doesn't include appendSwitch entries, so log explicitly
+  console.log('[Startup] Applied Chromium switches:', {
+    disableMacOverlays: true,
+    disableAcceleratedVideoDecode: true,
+    disableGpuMemoryBufferCompositorResources: true,
+    disableZeroCopy: true,
+    useAngle: 'metal'
+  });
+} catch (e) {
+  console.warn('Failed to apply Chromium switches:', e);
+}
 
 class ElectronApp {
   private mainWindow: BrowserWindowType | null = null;
   
   async initialize() {
     await app.whenReady();
+    // Initialize file logger early to capture subsequent logs
+    initFileLogger();
     
     console.log('ElectronApp: Initializing managers...');
     
@@ -35,13 +68,19 @@ class ElectronApp {
       height: 1000,
       minWidth: 1200,
       minHeight: 800,
+      // Avoid heavy WindowServer shadow compositing on macOS
+      hasShadow: false,
+      // Ensure opaque background to prevent alpha-based shadow masks
+      backgroundColor: '#000000',
       titleBarStyle: 'default',
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
         preload: path.join(__dirname, './preload.js'),
         webSecurity: false, // ローカルファイルアクセスのため無効化
-        allowRunningInsecureContent: true
+        allowRunningInsecureContent: true,
+        // バックグラウンドでもスロットリングしない（裏画面レンダリングの安定化/高速化）
+        backgroundThrottling: false
       }
     });
     
@@ -326,6 +365,15 @@ class ElectronApp {
         console.log('Prevented navigation to:', url);
         return { action: 'deny' };
       });
+    });
+
+    // GPU/child process crash diagnostics
+    app.on('gpu-process-crashed', (event, killed) => {
+      console.error('[GPU] gpu-process-crashed:', { killed });
+    });
+
+    app.on('child-process-gone', (event, details) => {
+      console.error('[GPU] child-process-gone:', details);
     });
   }
   

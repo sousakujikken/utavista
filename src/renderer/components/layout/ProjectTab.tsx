@@ -5,6 +5,7 @@ import { DebugEventBus } from '../../utils/DebugEventBus';
 import { ModernVideoExportOptions } from '../../export/video/VideoExporter';
 import { Button, Select, Input, Section, StatusMessage } from '../common';
 import './ProjectTab.css';
+import { WebCodecsLockstepExporter } from '../../export';
 
 interface ProjectTabProps {
   engine: Engine;
@@ -38,8 +39,16 @@ const ProjectTab: React.FC<ProjectTabProps> = ({ engine }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [batchProgress, setBatchProgress] = useState<number | undefined>();
+  const [stepIndex, setStepIndex] = useState<number | null>(null);
+  const [stepCount, setStepCount] = useState<number | null>(null);
+  const [stepName, setStepName] = useState<string | null>(null);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
   const [memoryUsage, setMemoryUsage] = useState<number | undefined>();
   const [exportError, setExportError] = useState<string | null>(null);
+  // ロックステップエクスポーター参照（キャンセル対応）
+  const exporterRef = useRef<WebCodecsLockstepExporter | null>(null);
+  // WebCodecsサポート状況（現在の設定に対する）
+  const [webcodecsUnsupportedMsg, setWebcodecsUnsupportedMsg] = useState<string | null>(null);
   
   // 背景動画フレームレート関連
   const [backgroundVideoFps, setBackgroundVideoFps] = useState<number | null>(null);
@@ -112,6 +121,63 @@ const ProjectTab: React.FC<ProjectTabProps> = ({ engine }) => {
     const currentAspectRatio = getCurrentAspectRatio();
     return calculateResolution(currentAspectRatio, longSideResolution);
   };
+
+  // WebCodecsで指定解像度/fpsがサポートされるか事前検証し、メッセージとボタン無効化を制御
+  useEffect(() => {
+    let cancelled = false;
+    const checkSupport = async () => {
+      try {
+        const { width, height } = getCurrentResolution();
+        const curFps = fps;
+        const currentAR = getCurrentAspectRatio();
+
+        const VE: any = (window as any).VideoEncoder;
+        if (!VE || typeof VE.isConfigSupported !== 'function') {
+          if (!cancelled) setWebcodecsUnsupportedMsg('この環境はWebCodecsをサポートしていません。');
+          return;
+        }
+
+        const baseCfg: any = {
+          width,
+          height,
+          framerate: curFps,
+          hardwareAcceleration: 'prefer-hardware',
+          latencyMode: 'quality',
+          avc: { format: 'annexb' },
+        };
+        // Prefer High@L5.0 first, then try L4.0
+        const configsToTry: any[] = [
+          { ...baseCfg, codec: 'avc1.640032' }, // High@L5.0
+          { ...baseCfg, codec: 'avc1.640028' }, // High@L4.0
+        ];
+
+        let supported = false;
+        for (const cfg of configsToTry) {
+          try {
+            const result = await VE.isConfigSupported(cfg);
+            if (result?.supported) { supported = true; break; }
+          } catch (_) { /* try next */ }
+        }
+
+        if (cancelled) return;
+        if (supported) {
+          setWebcodecsUnsupportedMsg(null);
+          return;
+        }
+
+        // Contextual messages
+        if (currentAR === '1:1' && width === 1920 && height === 1920) {
+          setWebcodecsUnsupportedMsg('縦横比1:1の場合 1920 では出力できません。解像度を 1440 以下に下げてください。');
+        } else {
+          setWebcodecsUnsupportedMsg(`現在の設定ではWebCodecsで出力できません（${width}x${height}@${curFps}）。解像度やフレームレートを調整してください。`);
+        }
+      } catch {
+        if (!cancelled) setWebcodecsUnsupportedMsg('WebCodecs設定検証中に問題が発生しました。別の解像度をお試しください。');
+      }
+    };
+    checkSupport();
+    return () => { cancelled = true; };
+  }, [longSideResolution, fps, getCurrentResolution, getCurrentAspectRatio]);
 
   // ステータス表示の更新
   const showStatus = useCallback((message: string, type: 'success' | 'error' | 'info') => {
@@ -236,8 +302,13 @@ const ProjectTab: React.FC<ProjectTabProps> = ({ engine }) => {
   }, [showStatus]);
 
 
-  // 実際のエクスポート処理
+  // 実際のエクスポート処理（ロックステップに一本化）
   const handleExport = async () => {
+    await handleLockstepExport();
+  };
+
+  // ロックステップ（WebCodecs）高速エクスポート（プロジェクトタブ版・デバッグUI）
+  const handleLockstepExport = async () => {
     const electronAPI = (window as any).electronAPI;
     if (!electronAPI) {
       setExportError('Electron APIが利用できません');
@@ -246,88 +317,80 @@ const ProjectTab: React.FC<ProjectTabProps> = ({ engine }) => {
 
     try {
       // ファイル保存ダイアログを表示
-      const defaultFileName = `animation_export_${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`;
+      const defaultFileName = `lockstep_export_${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`;
       const filePath = await electronAPI.showSaveDialogForVideo(defaultFileName);
-      
-      if (!filePath) {
-        // ユーザーがキャンセルした
-        return;
-      }
+      if (!filePath) return; // キャンセル
 
       setIsExporting(true);
       setProgress(0);
-      setBatchProgress(undefined);
-      setMemoryUsage(undefined);
       setExportError(null);
 
-      const duration = engine.getMaxTime();
+      exporterRef.current = new WebCodecsLockstepExporter(engine);
+      const exporter = exporterRef.current;
+      if (!exporter.isSupported) {
+        throw new Error('この環境はWebCodecsをサポートしていません。通常のエクスポートを使用してください。');
+      }
+
+      // 解像度・区間・音声パスを準備
       const resolution = getCurrentResolution();
-      const stageConfig = engine.getStageConfig();
-      
-      // ファイルパスからファイル名だけを抽出
-      const fileName = filePath.split(/[/\\]/).pop() || 'animation_export.mp4';
-      
-      const options: ModernVideoExportOptions = {
-        aspectRatio: stageConfig.aspectRatio,
-        orientation: stageConfig.orientation,
-        quality: 'CUSTOM',
-        customResolution: resolution,
-        videoQuality,
+      let audioPath: string | undefined = undefined;
+      if (includeMusicTrack) {
+        try {
+          const { electronMediaManager } = await import('../../services/ElectronMediaManager');
+          audioPath = electronMediaManager.getCurrentAudioFilePath() || undefined;
+        } catch {}
+      }
+
+      const outPath = await exporter.start({
+        fileName: filePath.split(/[/\\]/).pop() || 'lockstep_export.mp4',
         fps,
-        fileName: fileName,
+        width: resolution.width,
+        height: resolution.height,
         startTime: useCustomRange ? startTime : 0,
-        endTime: useCustomRange ? endTime : duration,
-        includeDebugVisuals: false,
-        includeMusicTrack,
-        outputPath: filePath // フルパスを追加
-      };
-
-      const outputPath = await engine.videoExporter.startDirectExport(
-        options,
-        (p) => {
-          setProgress(p * 100); // progressは0-1の範囲なので100倍する
+        endTime: useCustomRange ? endTime : engine.getMaxTime(),
+        audioPath,
+        outputPath: filePath
+      }, (p) => {
+        if (typeof p === 'number') {
+          setProgress(p * 100);
+          setStepIndex(null); setStepCount(null); setStepName(null); setEtaSeconds(null);
+        } else {
+          setProgress(Math.round(p.overall * 100));
+          setStepIndex(p.step);
+          setStepCount(p.steps);
+          setStepName(p.stepName);
+          setEtaSeconds(p.etaSeconds ?? null);
         }
-      );
+      });
 
-      if (outputPath) {
-        showStatus(`動画を出力しました: ${outputPath}`, 'success');
+      if (outPath) {
+        showStatus(`ロックステップで出力しました: ${outPath}`, 'success');
       }
     } catch (error) {
-      console.error('Export failed:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      // キャンセルメッセージの場合は正常なキャンセル処理として扱う
-      if (errorMessage.includes('cancelled') || errorMessage.includes('Export was cancelled by user')) {
-        showStatus('動画出力をキャンセルしました', 'info');
-        setExportError(null);
-      } else {
-        setExportError(errorMessage);
-      }
+      console.error('Lockstep export failed:', error);
+      setExportError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsExporting(false);
+      exporterRef.current = null;
     }
   };
 
   // エクスポートのキャンセル処理
   const handleCancelExport = async () => {
-    if (isExporting && engine && engine.videoExporter) {
-      try {
-        await engine.videoExporter.cancelExport();
-        setIsExporting(false);
-        setProgress(0);
-        setBatchProgress(undefined);
-        setMemoryUsage(undefined);
-        setExportError(null);
-        showStatus('動画出力をキャンセルしました', 'info');
-      } catch (error) {
-        console.error('Failed to cancel export:', error);
-        // キャンセル失敗時も状態をリセット
-        setIsExporting(false);
-        setProgress(0);
-        setBatchProgress(undefined);
-        setMemoryUsage(undefined);
-        setExportError('エクスポートのキャンセルに失敗しましたが、処理は停止されました');
-      }
+    if (!isExporting) return;
+    try {
+      exporterRef.current?.cancel();
+      setExportError(null);
+      showStatus('動画出力をキャンセルしました', 'info');
+    } catch (error) {
+      console.error('Failed to cancel export:', error);
+      setExportError('エクスポートのキャンセルに失敗しましたが、処理は停止されました');
+    } finally {
+      setIsExporting(false);
+      setProgress(0);
+      setBatchProgress(undefined);
+      setMemoryUsage(undefined);
+      exporterRef.current = null;
     }
   };
 
@@ -642,14 +705,45 @@ const ProjectTab: React.FC<ProjectTabProps> = ({ engine }) => {
             </span>
           </div>
 
-          {/* エクスポートボタン */}
+          {/* エクスポート進捗（ボタンの上へ移動） */}
+          {isExporting && (
+            <div className="export-progress u-mb-md">
+              <div className="progress-container">
+                <div 
+                  className="progress-bar" 
+                  style={{ width: `${progress}%` }}
+                />
+                <span className="progress-text">{Math.round(progress)}%</span>
+              </div>
+              <div className="export-info">
+                {stepIndex && stepCount && (
+                  <span>ステップ {stepIndex}/{stepCount}{stepName ? `（${stepName}）` : ''}</span>
+                )}
+                {etaSeconds !== null && (
+                  <span>残り予測時間: {new Date((etaSeconds || 0) * 1000).toISOString().substr(14, 5)}</span>
+                )}
+                {batchProgress !== undefined && (
+                  <span>バッチ進捗: {Math.round(batchProgress)}%</span>
+                )}
+                {memoryUsage !== undefined && (
+                  <span>メモリ使用量: {memoryUsage}MB</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* エクスポートボタン（進捗の下に配置） */}
           <div className="u-mt-lg">
+            {!isExporting && webcodecsUnsupportedMsg && (
+              <div className="export-warning u-mb-sm">{webcodecsUnsupportedMsg}</div>
+            )}
             {!isExporting ? (
               <Button 
                 variant="primary"
                 size="large"
                 fullWidth
                 onClick={handleExport}
+                disabled={!!webcodecsUnsupportedMsg}
               >
                 動画を出力
               </Button>
@@ -663,28 +757,8 @@ const ProjectTab: React.FC<ProjectTabProps> = ({ engine }) => {
                 キャンセル
               </Button>
             )}
+            {/* 実験ボタンは廃止（ロックステップに一本化） */}
           </div>
-
-          {/* エクスポート進捗 */}
-          {isExporting && (
-            <div className="export-progress">
-              <div className="progress-container">
-                <div 
-                  className="progress-bar" 
-                  style={{ width: `${progress}%` }}
-                />
-                <span className="progress-text">{Math.round(progress)}%</span>
-              </div>
-              <div className="export-info">
-                {batchProgress !== undefined && (
-                  <span>バッチ進捗: {Math.round(batchProgress)}%</span>
-                )}
-                {memoryUsage !== undefined && (
-                  <span>メモリ使用量: {memoryUsage}MB</span>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* エラー表示 */}
           {exportError && (

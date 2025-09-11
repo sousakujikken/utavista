@@ -1583,6 +1583,13 @@ export class Engine {
   // クリーンアップ
   destroy() {
     try {
+      // 背景メディアと関連テクスチャを先に解放（GPUリソース優先）
+      try {
+        this.clearBackgroundMedia();
+      } catch (e) {
+        console.warn('Engine: clearBackgroundMedia during destroy failed:', e);
+      }
+
       // 自動保存タイマーをクリア
       if (this.autoSaveTimer) {
         clearInterval(this.autoSaveTimer);
@@ -1621,13 +1628,41 @@ export class Engine {
       
       // PIXI アプリケーションを破棄
       if (this.app) {
+        // 可能ならWebGLコンテキストを明示的に破棄してGPUを即時解放
+        try {
+          const anyRenderer: any = this.app.renderer as any;
+          const gl: WebGLRenderingContext | WebGL2RenderingContext | undefined = anyRenderer?.gl;
+          const loseCtx = gl && (gl.getExtension && gl.getExtension('WEBGL_lose_context'));
+          if (loseCtx && typeof loseCtx.loseContext === 'function') {
+            loseCtx.loseContext();
+          }
+        } catch (e) {
+          // 失敗しても致命的ではないためログのみ
+          console.warn('Engine: Failed to explicitly lose WebGL context:', e);
+        }
+
         this.app.destroy(true, {children: true, texture: true, baseTexture: true});
       }
-      
+
       // HTML要素をクリア
       if (this.canvasContainer) {
         this.canvasContainer.innerHTML = '';
       }
+
+      // テクスチャキャッシュをクリアしてキャッシュ由来のGPUリソースを解放
+      try {
+        (PIXI.utils as any)?.destroyTextureCache?.();
+      } catch (e) {
+        console.warn('Engine: destroyTextureCache failed (non-fatal):', e);
+      }
+
+      // グローバル参照を削除
+      try {
+        if (typeof window !== 'undefined') {
+          delete (window as any).__PIXI_APP__;
+          delete (window as any).engineInstance;
+        }
+      } catch {}
     } catch (error) {
       console.error('Engine destroy error:', error);
     }
@@ -1759,10 +1794,12 @@ export class Engine {
       const result = this.templateManager.assignTemplate(objectId, templateId);
       
       if (result) {
-        // 個別テンプレート設定時は個別設定を自動有効化
-        if (this.isPhraseId(objectId)) {
-          console.log(`[Engine] Auto-enabling individual setting for template change: ${objectId}`);
-          this.parameterManager.enableIndividualSetting(objectId);
+        // 個別テンプレート設定時は親フレーズの個別設定を自動有効化（階層に関わらず有効化する）
+        // これにより、フレーズ以外（word/char）にテンプレートを適用した場合でも
+        // タイムライン上の該当フレーズマーカーが緑色に切り替わり、保存時にも確実に保持される
+        const phraseIdForActivation = this.parameterManager.extractPhraseId(objectId);
+        if (phraseIdForActivation) {
+          this.parameterManager.enableIndividualSetting(phraseIdForActivation);
         }
         
         // 統合されたインスタンス更新処理
@@ -2489,6 +2526,8 @@ export class Engine {
     video.loop = loop; // ループ設定を適用
     video.muted = true; // 自動再生のためにミュート
     video.playsInline = true;
+    video.autoplay = false;
+    video.preload = 'auto';
     
     video.addEventListener('loadedmetadata', () => {
       const texture = PIXI.Texture.from(video);
@@ -2498,11 +2537,9 @@ export class Engine {
       
       this.backgroundVideo = video;
       
-      // 再生状態に応じて動画を同期
-      if (this.isRunning) {
-        video.currentTime = this.currentTime / 1000;
-        video.play().catch(console.error);
-      }
+      // 常に初期状態は停止
+      try { video.pause(); } catch {}
+      video.currentTime = (this.currentTime || 0) / 1000;
       
     });
     
@@ -2512,6 +2549,13 @@ export class Engine {
       this.clearBackgroundMedia();
     });
     
+    // 再生イベントが発生しても、再生中フラグが false なら即時停止
+    const onPlayGuard = () => {
+      if (!this.isRunning) {
+        try { video.pause(); } catch {}
+      }
+    };
+    try { video.addEventListener('play', onPlayGuard); } catch {}
     video.load();
   }
   
@@ -2534,8 +2578,10 @@ export class Engine {
       videoLoop: loop
     };
     
-    // ループ設定を適用
+    // ループ設定・自動再生制御
     video.loop = loop;
+    video.autoplay = false;
+    video.preload = 'auto';
     
     // すでに読み込まれている動画からテクスチャを作成
     const texture = PIXI.Texture.from(video);
@@ -2545,11 +2591,17 @@ export class Engine {
     
     this.backgroundVideo = video;
     
-    // 再生状態に応じて動画を同期
-    if (this.isRunning) {
-      video.currentTime = this.currentTime / 1000;
-      video.play().catch(console.error);
-    }
+    // 常に初期状態は停止
+    try { video.pause(); } catch {}
+    video.currentTime = (this.currentTime || 0) / 1000;
+
+    // 再生イベントガード
+    const onPlayGuard = () => {
+      if (!this.isRunning) {
+        try { video.pause(); } catch {}
+      }
+    };
+    try { video.addEventListener('play', onPlayGuard); } catch {}
     
   }
 
@@ -2560,20 +2612,28 @@ export class Engine {
     // 背景スプライトを削除
     if (this.backgroundSprite) {
       this.backgroundLayer.removeChild(this.backgroundSprite);
-      this.backgroundSprite.destroy();
+      // テクスチャ/ベーステクスチャも含めて確実に破棄
+      this.backgroundSprite.destroy({ children: true, texture: true, baseTexture: true });
       this.backgroundSprite = undefined;
     }
     
     // 背景動画を削除
     if (this.backgroundVideoSprite) {
       this.backgroundLayer.removeChild(this.backgroundVideoSprite);
-      this.backgroundVideoSprite.destroy();
+      // Video由来のテクスチャを完全に破棄
+      this.backgroundVideoSprite.destroy({ children: true, texture: true, baseTexture: true });
       this.backgroundVideoSprite = undefined;
     }
     
     if (this.backgroundVideo) {
-      this.backgroundVideo.pause();
-      this.backgroundVideo.src = '';
+      try {
+        this.backgroundVideo.pause();
+        // 完全解放のためsrc属性を削除してロードし直す
+        this.backgroundVideo.removeAttribute('src');
+        this.backgroundVideo.load();
+      } catch (e) {
+        console.warn('Engine: backgroundVideo cleanup error:', e);
+      }
       this.backgroundVideo = undefined;
     }
     
@@ -2581,6 +2641,7 @@ export class Engine {
     this.backgroundConfig.type = 'color';
     delete this.backgroundConfig.imageFilePath;
     delete this.backgroundConfig.videoFilePath;
+    this.backgroundVideoFileName = null;
   }
   
   /**
@@ -2897,6 +2958,14 @@ export class Engine {
         
         // ピクセルデータを取得
         pixels = this.app.renderer.extract.pixels(renderTexture);
+        // GPU コマンドを明示的にフラッシュ（macOS WindowServer 安定化対策）
+        try {
+          const anyRenderer: any = this.app.renderer as any;
+          const gl: WebGLRenderingContext | WebGL2RenderingContext | undefined = anyRenderer?.gl;
+          if (gl && typeof gl.flush === 'function') {
+            gl.flush();
+          }
+        } catch (_) {}
         
         // レンダーテクスチャをクリーンアップ
         renderTexture.destroy();
@@ -2907,6 +2976,14 @@ export class Engine {
       } else {
         // 現在のサイズのままキャプチャ
         pixels = this.app.renderer.extract.pixels();
+        // GPU コマンドを明示的にフラッシュ
+        try {
+          const anyRenderer: any = this.app.renderer as any;
+          const gl: WebGLRenderingContext | WebGL2RenderingContext | undefined = anyRenderer?.gl;
+          if (gl && typeof gl.flush === 'function') {
+            gl.flush();
+          }
+        } catch (_) {}
       }
       
       // デバッグビジュアルの設定を復元
@@ -2965,10 +3042,12 @@ export class Engine {
         const scaleY = outputHeight / baseHeight;
         const averageScale = (scaleX + scaleY) / 2; // 平均スケールを計算
         
-        // 🔧 デバッグログ：サイズ比較
-        const currentStageWidth = this.app.stage.width;
-        const currentStageHeight = this.app.stage.height;
-        console.log(`🎯 [FIXED_SIZE_CAPTURE] Base: ${baseWidth}x${baseHeight}, Stage: ${currentStageWidth}x${currentStageHeight}, Output: ${outputWidth}x${outputHeight}, Scale: ${scaleX.toFixed(3)}x${scaleY.toFixed(3)}, AvgScale: ${averageScale.toFixed(3)}`);
+        // 🔧 デバッグログ：サイズ比較（renderer 基準）
+        // 注意: PIXI の stage.width/height は内容物の境界に依存し少数になり得ます。
+        // ここではレンダラー基準の固定ピクセル（整数）を出力して混同を避けます。
+        const currentRendererWidth = this.app.renderer.width;
+        const currentRendererHeight = this.app.renderer.height;
+        console.log(`🎯 [FIXED_SIZE_CAPTURE] Base: ${baseWidth}x${baseHeight}, Renderer: ${currentRendererWidth}x${currentRendererHeight}, Output: ${outputWidth}x${outputHeight}, Scale: ${scaleX.toFixed(3)}x${scaleY.toFixed(3)}, AvgScale: ${averageScale.toFixed(3)}`);
         
         // パーティクル品質向上：解像度スケールファクターを設定
         this.setParticleResolutionScale(averageScale);
@@ -2986,6 +3065,14 @@ export class Engine {
           
           // ピクセルデータを取得
           const pixels = this.app.renderer.extract.pixels(renderTexture);
+          // GPU コマンドを明示的にフラッシュ（macOS WindowServer 安定化対策）
+          try {
+            const anyRenderer: any = this.app.renderer as any;
+            const gl: WebGLRenderingContext | WebGL2RenderingContext | undefined = anyRenderer?.gl;
+            if (gl && typeof gl.flush === 'function') {
+              gl.flush();
+            }
+          } catch (_) {}
           
           return pixels;
           
@@ -3023,6 +3110,118 @@ export class Engine {
    */
   getBackgroundVideo(): HTMLVideoElement | null {
     return this.backgroundVideo || null;
+  }
+
+  /**
+   * ロックステップ用: 指定パスの画像で背景を即時更新（ロード完了を待って解決）
+   */
+  async setBackgroundImageForCapture(imagePath: string, fitMode: BackgroundFitMode = 'cover'): Promise<void> {
+    return new Promise<void>((resolve) => {
+      try {
+        // 既存の動画スプライトより画像を優先
+        if (this.backgroundVideoSprite) {
+          this.backgroundLayer.removeChild(this.backgroundVideoSprite);
+          this.backgroundVideoSprite.destroy({ children: true, texture: true, baseTexture: true });
+          this.backgroundVideoSprite = undefined;
+        }
+        // 画像スプライトがなければ作る
+        if (!this.backgroundSprite) {
+          this.backgroundSprite = new PIXI.Sprite();
+          this.backgroundLayer.addChild(this.backgroundSprite);
+        }
+
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const tex = PIXI.Texture.from(img);
+            this.backgroundSprite!.texture = tex;
+            this.applyBackgroundFitMode(this.backgroundSprite!, fitMode);
+            resolve();
+          } catch (e) {
+            console.warn('Engine.setBackgroundImageForCapture texture assign failed:', e);
+            resolve();
+          }
+        };
+        img.onerror = () => resolve();
+        // ローカルファイル: file:// スキームで安全に読み込む
+        if (imagePath.startsWith('/') || imagePath.match(/^[A-Za-z]:\\/)) {
+          img.src = 'file://' + encodeURI(imagePath.replace(/\\/g, '/'));
+        } else {
+          img.src = imagePath;
+        }
+      } catch (e) {
+        console.warn('Engine.setBackgroundImageForCapture failed:', e);
+        resolve();
+      }
+    });
+  }
+
+  /**
+   * 背景動画を任意の時刻で停止（エクスポート用のフリーズ）
+   * 必要に応じてloopを考慮しつつ currentTime を更新し、pause してから seeked 待ちで描画を安定化
+   */
+  async freezeBackgroundVideoAt(timeMs: number): Promise<void> {
+    const video = this.backgroundVideo;
+    if (!video) return;
+
+    try {
+      // 再生を確実に停止
+      try { video.pause(); } catch {}
+
+      // ループ設定を考慮してシーク
+      const videoTimeSeconds = Math.max(0, timeMs / 1000);
+      const duration = video.duration;
+      let target = videoTimeSeconds;
+      if (Number.isFinite(duration) && duration > 0) {
+        target = videoTimeSeconds % duration;
+      }
+
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finalize = () => {
+          if (settled) return;
+          settled = true;
+          // ビデオフレームが反映された後に描画
+          try { this.app.render(); } catch {}
+          resolve();
+        };
+
+        const onSeeked = () => {
+          video.removeEventListener('seeked', onSeeked);
+          // requestVideoFrameCallback があればそれで最終確定
+          const anyVideo: any = video as any;
+          if (typeof anyVideo.requestVideoFrameCallback === 'function') {
+            try {
+              anyVideo.requestVideoFrameCallback(() => {
+                try {
+                  // 背景テクスチャを明示的に更新（PIXI VideoTexture）
+                  const sprite = this.backgroundVideoSprite as any;
+                  const tex = sprite?.texture;
+                  const base = tex?.baseTexture;
+                  const res = base?.resource;
+                  if (typeof res?.update === 'function') {
+                    res.update();
+                  } else if (typeof tex?.update === 'function') {
+                    tex.update();
+                  }
+                } catch {}
+                finalize();
+              });
+              return;
+            } catch {}
+          }
+          // ない場合は小さな遅延ののち確定
+          setTimeout(finalize, 10);
+        };
+
+        try { video.addEventListener('seeked', onSeeked, { once: true } as any); } catch {}
+        try { video.currentTime = target; } catch {}
+        // フォールバック
+        setTimeout(finalize, 120);
+      });
+    } catch (e) {
+      console.warn('Engine.freezeBackgroundVideoAt failed (non-fatal):', e);
+    }
   }
   
   /**
@@ -3637,7 +3836,13 @@ export class Engine {
    * エクスポート用リソースを初期化（RenderTexturePool）
    */
   initializeExportResources(width: number, height: number): void {
-    this.renderTexturePool = new RenderTexturePool(width, height, 5);
+    // 幅・高さは整数であるべき（UI指定の解像度）。念のため丸めて警告。
+    const intWidth = Math.round(width);
+    const intHeight = Math.round(height);
+    if (intWidth !== width || intHeight !== height) {
+      console.warn(`initializeExportResources: non-integer size detected (${width}x${height}). Rounded to ${intWidth}x${intHeight}.`);
+    }
+    this.renderTexturePool = new RenderTexturePool(intWidth, intHeight, 5);
     
     // エクスポート用高解像度テキストの準備
     this.prepareHighResolutionTextForExport(width, height);
@@ -3833,9 +4038,11 @@ export class Engine {
     this.optimizedUpdater.setCurrentTime(this.currentTime);
     // ログ抑制: Current time (毎フレーム出力)
     
-    // 初期化済みフレーズのリストを作成
+    // 初期化済みフレーズのリストを作成（個別設定フレーズは除外）
+    const individualSet = new Set(this.parameterManager.getIndividualSettingsEnabled());
     const phrasesToUpdate = this.phrases
       .filter(phrase => this.parameterManager.isPhraseInitialized(phrase.id))
+      .filter(phrase => !individualSet.has(phrase.id))
       .map(phrase => ({
         id: phrase.id,
         startMs: phrase.start * 1000,  // 秒からミリ秒に変換
@@ -3850,6 +4057,8 @@ export class Engine {
       params,
       {
         updatePhrase: (phraseId, updateParams) => {
+          // 追加防御: 個別設定フレーズはスキップ
+          if (this.parameterManager.isIndividualSettingEnabled(phraseId)) return;
           this.parameterManager.updateParameters(phraseId, updateParams);
         },
         onSyncComplete: (visiblePhraseIds) => {

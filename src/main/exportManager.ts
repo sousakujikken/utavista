@@ -346,6 +346,88 @@ export function setupExportHandlers() {
       throw error;
     }
   });
+
+  // WebCodecs lockstep handlers
+  ipcMain.handle('export:webcodecs:start', async (event, options: {
+    sessionId: string;
+    fileName: string;
+    fps: number;
+    width: number;
+    height: number;
+    audioPath?: string;
+    outputPath?: string;
+  }) => {
+    try {
+      return await exportManager.batchVideoProcessor.webcodecsStart(options);
+    } catch (error) {
+      console.error('Failed to start WebCodecs session:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('export:webcodecs:chunk', async (event, payload: {
+    sessionId: string;
+    data: Uint8Array;
+    isKey: boolean;
+    timestamp: number;
+    duration?: number;
+  }) => {
+    try {
+      return await exportManager.batchVideoProcessor.webcodecsAppendChunk(payload);
+    } catch (error) {
+      console.error('Failed to append WebCodecs chunk:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('export:webcodecs:finalize', async (event, options: { sessionId: string }) => {
+    try {
+      const out = await exportManager.batchVideoProcessor.webcodecsFinalize(options);
+      exportManager.batchVideoProcessor.sendCompletedToRenderer(out);
+      return out;
+    } catch (error) {
+      console.error('Failed to finalize WebCodecs export:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('export:webcodecs:cancel', async (event, options: { sessionId: string }) => {
+    try {
+      return await exportManager.batchVideoProcessor.webcodecsCancel(options);
+    } catch (error) {
+      console.error('Failed to cancel WebCodecs export:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('export:webcodecs:extract-bg-frames', async (event, options: {
+    sessionId: string;
+    videoPath: string;
+    fps: number;
+    width: number;
+    height: number;
+    startTimeMs: number;
+    endTimeMs: number;
+    quality?: number;
+    fitMode?: 'cover' | 'contain' | 'stretch';
+  }) => {
+    try {
+      return await exportManager.batchVideoProcessor.webcodecsExtractBgFrames(options);
+    } catch (error) {
+      console.error('Failed to extract background frames:', error);
+      throw error;
+    }
+  });
+
+  // Lockstep timeline computation (optional optimization by plugin)
+  ipcMain.handle('export:webcodecs:timeline', async (event, options: { fps: number; startTimeMs: number; endTimeMs: number }) => {
+    try {
+      return await exportManager.batchVideoProcessor.webcodecsGetTimeline(options);
+    } catch (error) {
+      console.error('Failed to compute lockstep timeline:', error);
+      throw error;
+    }
+  });
   
   ipcMain.handle('export:saveFrameImage', async (event, sessionId: string, frameName: string, frameData: Uint8Array, width?: number, height?: number) => {
     try {

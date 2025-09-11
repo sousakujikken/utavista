@@ -5,6 +5,7 @@
  */
 
 import * as PIXI from 'pixi.js';
+ 
 import { IAnimationTemplate, HierarchyType, AnimationPhase, ParameterConfig } from '../types/types';
 import { FontService } from '../services/FontService';
 import { TextStyleFactory } from '../utils/TextStyleFactory';
@@ -33,6 +34,7 @@ interface HorizontalSlice {
   wordIndex: number;   // 単語インデックス
   charIndex: number;   // 文字インデックス
   originalChar: string; // 元の文字
+  graphics?: PIXI.Graphics; // 対応するGraphicsオブジェクト
 }
 
 /**
@@ -96,6 +98,44 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
   // フェーズ変更検出用
   private lastPhaseMap = new Map<string, AnimationPhase>();
 
+  // パラメータ変更検出用（黒帯サイズ/色等のハッシュ）
+  private paramSignatureMap = new Map<string, string>();
+
+  /**
+   * 黒帯やマスクの孤児ノード（管理コンテナ外に残ったもの）を強制的に除去
+   * - 想定: 過去の実装で blackBandContainer 配下以外に直接ぶら下がった残骸
+   */
+  private purgeOrphanBandsAndMasks(phraseContainer: PIXI.Container, phraseId: string): void {
+    try {
+      if (!phraseContainer || phraseContainer.destroyed) return;
+
+      const containers = this.graphicsContainers.get(phraseId);
+      const managedBlackBandContainer = containers?.blackBandContainer || null;
+
+      // 直接の子だけを対象（過去の名残で直下に残るケースをケア）
+      const toRemove: PIXI.DisplayObject[] = [];
+      for (const child of phraseContainer.children) {
+        const name = (child as any).name || '';
+        const isOrphanBand = name.startsWith(`black_band_`) && child !== managedBlackBandContainer;
+        const isOrphanMask = name === 'swipe_in_mask' || name.startsWith('swipe_in_mask_') || name === 'unified_swipe_mask';
+
+        // 管理下の blackBandContainer 自体は削除対象にしない
+        if (isOrphanBand || isOrphanMask) {
+          toRemove.push(child);
+        }
+      }
+
+      for (const node of toRemove) {
+        try {
+          // マスク解除
+          if ((node as any).mask) (node as any).mask = null;
+          if (node.parent) node.parent.removeChild(node);
+          (node as any).destroy?.({ children: true });
+        } catch {}
+      }
+    } catch {}
+  }
+
   // 状態管理を削除 - 純粋な時間ベース計算のみ使用
 
   
@@ -138,7 +178,7 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
       },
       
       // 画面中心からのオフセット (v0.4.3標準)
-      { name: "phraseOffsetX", type: "number", default: 0, min: -500, max: 500, step: 10 },
+      { name: "phraseOffsetX", type: "number", default: 0, min: -1000, max: 1000, step: 10 },
       { name: "phraseOffsetY", type: "number", default: 0, min: -500, max: 500, step: 10 },
       
       // 黒帯設定
@@ -261,6 +301,13 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
   cleanup(): void {
     console.log('[VerticalBlackBandTextPrimitive] Cleaning up internal state');
     
+    // 個別プリミティブインスタンスの適切なクリーンアップ
+    // Note: プリミティブにcleanupメソッドが追加された際のための準備
+    // 現在は内部状態のリセットとして新しいインスタンスを再作成
+    this.textGlowEffectPrimitive = new GlowEffectPrimitive();
+    this.bandGlowEffectPrimitive = new GlowEffectPrimitive();
+    this.shapePrimitive = new ShapePrimitive();
+    
     // グラフィックコンテナのクリア
     this.graphicsContainers.clear();
     
@@ -275,6 +322,7 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
     
     // フェーズ変更検出用のクリア
     this.lastPhaseMap.clear();
+    this.paramSignatureMap.clear();
     
     // プリミティブの全状態クリーンアップ
     SparkleEffectPrimitive.cleanup();
@@ -282,17 +330,146 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
     console.log('[VerticalBlackBandTextPrimitive] Cleanup complete');
   }
 
+  /** パラメータから視覚に影響するシグネチャを構築 */
+  private buildParamSignature(params: Record<string, unknown>): string {
+    const fontSize = (params.fontSize as number) ?? 120;
+    const bandWidthRatio = (params.blackBandWidthRatio as number) ?? 1.2;
+    const margin = (params.blackBandMarginWidth as number) ?? 1.0;
+    const colorRaw = (params.blackBandColor as any) ?? '#000000';
+    const color = typeof colorRaw === 'string' ? colorRaw.toLowerCase() : `#${Number(colorRaw).toString(16).padStart(6,'0')}`;
+    const blend = (params.maskBlendMode as string) ?? 'difference';
+    const charSpacing = (params.charSpacing as number) ?? 1.0;
+    const wordSpacing = (params.wordSpacing as number) ?? 1.0;
+    const words = (params.words as any[]) || [];
+    // 高さに影響しうる文字数をシグネチャに含める（chars優先、なければtext長）
+    const wordCharCounts = words.map(w => {
+      if (Array.isArray(w?.chars)) return w.chars.length;
+      if (typeof w?.text === 'string') return w.text.length;
+      return 0;
+    }).join(',');
+    return `${fontSize}|${bandWidthRatio}|${margin}|${color}|${blend}|cs:${charSpacing}|ws:${wordSpacing}|wc:${wordCharCounts}`;
+  }
+
+  /** パラメータ変更時にフレーズの視覚要素を完全リセット */
+  private resetPhraseVisuals(phraseContainer: PIXI.Container, phraseId: string): void {
+    try {
+      if (!phraseContainer || phraseContainer.destroyed) return;
+
+      // 1) 統一マスク解除・削除
+      try {
+        phraseContainer.mask = null;
+        const unified = phraseContainer.children.find(c => c.name === 'unified_swipe_mask');
+        if (unified) {
+          phraseContainer.removeChild(unified);
+          (unified as any).destroy?.({ children: true });
+        }
+      } catch {}
+
+      // 2) 黒帯・反転マスクのコンテナ削除
+      const containers = this.graphicsContainers.get(phraseId);
+      if (containers) {
+        try {
+          if (containers.blackBandContainer && !containers.blackBandContainer.destroyed) {
+            containers.blackBandContainer.mask = null;
+            containers.blackBandContainer.removeChildren();
+            if (containers.blackBandContainer.parent) containers.blackBandContainer.parent.removeChild(containers.blackBandContainer);
+            containers.blackBandContainer.destroy({ children: true });
+          }
+        } catch {}
+        try {
+          if (containers.invertMaskContainer && !containers.invertMaskContainer.destroyed) {
+            containers.invertMaskContainer.mask = null;
+            containers.invertMaskContainer.removeChildren();
+            if (containers.invertMaskContainer.parent) containers.invertMaskContainer.parent.removeChild(containers.invertMaskContainer);
+            containers.invertMaskContainer.destroy({ children: true });
+          }
+        } catch {}
+        this.graphicsContainers.delete(phraseId);
+      }
+
+      // 3) 子コンテナ（文字/単語）に残るmaskを解除し可視化
+      try {
+        phraseContainer.children.forEach(child => {
+          if (child instanceof PIXI.Container) {
+            (child as any).mask = null;
+            child.visible = true;
+            child.alpha = 1.0;
+          }
+        });
+      } catch {}
+
+      // 4) スワイプアウト状態などもクリア
+      this.clearSwipeOutSlices(phraseId);
+      this.swipeOutStates.delete(phraseId);
+
+      // 5) フェーズ・時間のトラッキングもリセット（入場判定を正しくやり直す）
+      this.lastTimeMap.delete(phraseId);
+      this.lastPhaseMap.delete(phraseId);
+
+    } catch {}
+  }
+
+  /**
+   * Graphics要素の安全な破棄処理
+   */
+  private destroyGraphicsSlices(slices: PIXI.Graphics[]): void {
+    slices.forEach((slice, index) => {
+      try {
+        if (slice && !slice.destroyed) {
+          // グラフィックデータをクリア
+          slice.clear();
+          
+          // 親から削除
+          if (slice.parent) {
+            slice.parent.removeChild(slice);
+          }
+          
+          // オブジェクトを破棄
+          slice.destroy({ 
+            children: true, 
+            texture: true, 
+            baseTexture: true 
+          });
+        }
+      } catch (error) {
+        console.warn(`[VERTICAL_BAND] Graphics slice ${index} destruction error:`, error);
+      }
+    });
+  }
+
   /**
    * ビジュアル要素の削除
    */
-  removeVisualElements(_container: PIXI.Container): void {
-    // プリミティブ一貫管理システムでは、
-    // コンテナ構造は Engine/InstanceManager で管理され、
-    // テンプレートは既存のコンテナに描画するだけなので
-    // removeVisualElementsでの削除処理は不要
-    // 
-    // フレーズ終了時の真のクリーンアップは
-    // スワイプアウト完了後に適切に実行される
+  removeVisualElements(container: PIXI.Container): void {
+    // WebGLリソースのメモリリークを防ぐため、適切なクリーンアップを実行
+    try {
+      const phraseId = this.extractPhraseIdFromContainerName(container.name || '');
+      if (phraseId) {
+        
+        // 即座にMapエントリを削除してメモリ使用量を削減
+        this.graphicsContainers.delete(phraseId);
+        this.wordStates.delete(phraseId);
+        this.swipeOutStates.delete(phraseId);
+        this.lastTimeMap.delete(phraseId);
+        this.lastPhaseMap.delete(phraseId);
+        
+        // プリミティブエフェクトのクリーンアップ
+        if (this.textGlowEffectPrimitive && typeof this.textGlowEffectPrimitive.removeEffect === 'function') {
+          this.textGlowEffectPrimitive.removeEffect(container);
+        }
+        if (this.bandGlowEffectPrimitive && typeof this.bandGlowEffectPrimitive.removeEffect === 'function') {
+          this.bandGlowEffectPrimitive.removeEffect(container);
+        }
+        
+        // グラフィックリソースの即座なクリーンアップ
+        this.clearPhraseGraphics(container);
+        
+        // スワイプアウト状態のクリーンアップ
+        this.clearSwipeOutSlices(phraseId);
+      }
+    } catch (error) {
+      console.error('[VERTICAL_BAND] removeVisualElements error:', error);
+    }
   }
   
   /**
@@ -356,6 +533,20 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
     
     // phraseIdを最初に定義（後で使用するため）
     const phraseId = params.phraseId as string || params.id as string || `phrase_${startMs}_${text.substring(0, 10)}`;
+
+    // パラメータ変更検出（黒帯の色/サイズなど視覚に影響するキー）
+    const signature = this.buildParamSignature(params);
+    const lastSig = this.paramSignatureMap.get(phraseId);
+    if (!lastSig || lastSig !== signature) {
+      // 変更検出: フレーズの視覚要素を安全にリセット
+      this.resetPhraseVisuals(container, phraseId);
+      // 念のため、孤児ノード（直下の黒帯/マスク残骸）も一掃
+      this.purgeOrphanBandsAndMasks(container, phraseId);
+      this.paramSignatureMap.set(phraseId, signature);
+    }
+
+    // 通常描画時にも、万一の孤児があれば除去（軽いチェック）
+    this.purgeOrphanBandsAndMasks(container, phraseId);
     
     // シーク検出による適切な状態管理
     const lastTime = this.lastTimeMap.get(phraseId) || 0;
@@ -390,6 +581,7 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
       } else {
         // シーク先がスワイプアウト期間外の場合のみ状態をリセット
         console.log(`[VERTICAL_BAND] シーク先がスワイプアウト期間外のため状態リセット: phraseId=${phraseId}`);
+        this.clearSwipeOutSlices(phraseId);
         this.swipeOutStates.delete(phraseId);
         
         // マスク参照をクリア（横書き版と同じ効率的な処理）
@@ -434,6 +626,7 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
       // フェーズが変わったら状態をリセット
       if (phase === 'in' || (phase === 'active' && lastPhase === 'out')) {
         console.log(`[VERTICAL_BAND] フェーズ変更により完全状態リセット: phraseId=${phraseId}`);
+        this.clearSwipeOutSlices(phraseId);
         this.swipeOutStates.delete(phraseId);
         
         // 完全なクリーンアップ処理
@@ -918,7 +1111,8 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
           MultiLineLayoutPrimitive.getInstance().releasePhraseFromLine(phraseId);
         }
         
-        // 状態をクリア
+        // 状態をクリア（スライスも適切にクリーンアップ）
+        this.clearSwipeOutSlices(phraseId);
         this.swipeOutStates.delete(phraseId);
       }
     } else if (isAfterSwipeOut) {
@@ -927,14 +1121,16 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
         phraseContainer.visible = false;
       }
       
-      // 状態が残っていればクリア
+      // 状態が残っていればスライスをクリーンアップしてから削除
       if (this.swipeOutStates.has(phraseId)) {
+        this.clearSwipeOutSlices(phraseId);
         this.swipeOutStates.delete(phraseId);
       }
     } else {
       // スワイプアウト前の通常状態
       // 状態が残っていればクリア（シークで戻った場合など）
       if (this.swipeOutStates.has(phraseId)) {
+        this.clearSwipeOutSlices(phraseId);
         
         try {
           // マスク参照のみクリア
@@ -968,9 +1164,11 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
             });
           }
           
+          this.clearSwipeOutSlices(phraseId);
           this.swipeOutStates.delete(phraseId);
         } catch (error) {
-          // エラーが発生しても状態をクリア
+          // エラーが発生してもスライスをクリーンアップしてから状態をクリア
+          this.clearSwipeOutSlices(phraseId);
           this.swipeOutStates.delete(phraseId);
         }
       }
@@ -1007,12 +1205,75 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
     );
     
     if (existingBlackBand) {
-      const blackBandGraphics = existingBlackBand as PIXI.Graphics;
+      const blackBandGraphics = existingBlackBand as PIXI.Graphics & { userData?: any };
       const beforeMask = blackBandGraphics.mask;
       console.log(`[VERTICAL_BAND] 既存通常黒帯発見: phraseId=${phraseId}, hasMask=${!!beforeMask}`);
-      
-      // 重要: マスク状態の管理は applySwipeInMaskToBlackBand に一元化
-      // ここではマスククリアを行わず、既存黒帯の存在を確認するのみ
+
+      // 現在の期待サイズ・色を算出
+      const fontSize = params.fontSize as number || 120;
+      const marginHeight = params.blackBandMarginWidth as number || 1.0;
+      const bandWidth = fontSize * (params.blackBandWidthRatio as number || 1.2);
+      const phraseHeight = this.getActualPhraseHeightForVertical(params);
+      const bandHeight = phraseHeight + (fontSize * marginHeight * 2);
+      const rawColor = (params.blackBandColor as any) ?? '#000000';
+      const desiredColor = typeof rawColor === 'string' ? rawColor.toLowerCase() : `#${Number(rawColor).toString(16).padStart(6,'0')}`;
+
+      const prev = blackBandGraphics.userData || {};
+      const needUpdate = (
+        Math.round(prev.width || 0) !== Math.round(bandWidth) ||
+        Math.round(prev.height || 0) !== Math.round(bandHeight) ||
+        (prev.color || '').toLowerCase() !== desiredColor
+      );
+
+      if (!needUpdate) {
+        // 再利用可能（何もしない）
+        return;
+      }
+
+      // 既存黒帯をインプレースで更新（破棄せず描画をやり直す）
+      try {
+        // マスク参照はこの時点では保持したままでも良いが、安全のため一旦外す
+        if (blackBandGraphics.mask) {
+          blackBandGraphics.mask = null;
+        }
+        // 描画をクリアして再描画
+        blackBandGraphics.clear();
+        // 塗り直し
+        const x = -bandWidth / 2;
+        const y = phraseHeight / 2 - (bandHeight / 2);
+        const colorNum = typeof desiredColor === 'string' && desiredColor.startsWith('#')
+          ? parseInt(desiredColor.slice(1), 16)
+          : 0x000000;
+        blackBandGraphics.beginFill(colorNum, 1.0);
+        blackBandGraphics.drawRect(x, y, bandWidth, bandHeight);
+        blackBandGraphics.endFill();
+        // メタ更新
+        blackBandGraphics.userData = {
+          width: bandWidth,
+          height: bandHeight,
+          color: desiredColor
+        };
+        // 可視性は維持（マスク適用フェーズで再制御）
+      } catch (e) {
+        // もし更新で失敗した場合は、安全のため作り直す
+        try {
+          if (blackBandGraphics.parent) blackBandGraphics.parent.removeChild(blackBandGraphics);
+          if (!blackBandGraphics.destroyed) blackBandGraphics.destroy({ children: true });
+        } catch {}
+        // ステールなマスクノードを掃除
+        const maskName = `swipe_in_mask_${phraseId}`;
+        const parent = blackBandContainer;
+        const staleMask = parent.children.find(c => (c as any).name === maskName) as PIXI.Graphics | undefined;
+        if (staleMask) {
+          try {
+            if ((staleMask as any).mask) (staleMask as any).mask = null;
+            parent.removeChild(staleMask);
+            if (!staleMask.destroyed) staleMask.destroy({ children: true });
+          } catch {}
+        }
+        // 新規作成にフォールバック（下の通常作成処理へ続行）
+      }
+      // 既存を更新できたので終了
       return;
     }
     
@@ -1021,6 +1282,11 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
       console.log(`[VERTICAL_BAND] スライス黒帯を削除して新規通常黒帯を作成: phraseId=${phraseId}`);
       
       // スライス黒帯を削除して新規通常黒帯を作成
+      try {
+        // まずマスク参照を外す
+        (blackBandContainer as any).mask = null;
+        blackBandContainer.children.forEach(c => { try { (c as any).mask = null; } catch {} });
+      } catch {}
       blackBandContainer.removeChildren();
     }
     
@@ -1049,11 +1315,22 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
       alpha: 1.0
     };
     
-    const blackBand = this.shapePrimitive.createRectangle(blackBandParams);
+    const blackBand = this.shapePrimitive.createRectangle(blackBandParams) as PIXI.Graphics & { userData?: any };
     blackBand.name = `black_band_${phraseId}`;
+    // 入力デバイスのヒットテスト対象にしない（破棄時のEventBoundaryエラー回避）
+    // @ts-ignore PIXI v7 eventMode
+    (blackBand as any).eventMode = 'none';
+    // 旧バージョン互換
+    (blackBand as any).interactive = false;
     // シーク検出対応: 新規作成時は完全に非表示（progress=0の場合）
     // 入場フェーズのマスク処理で適切に表示状態が管理される
     blackBand.visible = false;
+    // 再生成判定に使うメタデータを保存
+    blackBand.userData = {
+      width: blackBandParams.width,
+      height: blackBandParams.height,
+      color: (blackBandParams.color as string || '#000000').toLowerCase()
+    };
     
     console.log(`[VERTICAL_BAND] 新規黒帯作成完了: phraseId=${phraseId}, サイズ=(${bandWidth}x${bandHeight}), 位置=(${blackBandParams.x}, ${blackBandParams.y})`);
     
@@ -1116,6 +1393,10 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
       if (!swipeInMask) {
         swipeInMask = new PIXI.Graphics();
         swipeInMask.name = 'swipe_in_mask';
+        // マスクはヒットテスト不要
+        // @ts-ignore
+        (swipeInMask as any).eventMode = 'none';
+        (swipeInMask as any).interactive = false;
         blackBandContainer.addChild(swipeInMask);
       }
       
@@ -1219,8 +1500,23 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
       }
       
       
-      // 確定的マスク描画（時刻に対して一意に決定される）
-      this.applyDeterministicMask(swipeInMask, blackBand, deterministicMaskSize, phraseId);
+      // 進行度に応じた可視制御とマスク描画
+      if (progress <= 0) {
+        // まだ入場前：黒帯を不可視にし、マスクは空にする
+        blackBand.visible = false;
+        swipeInMask.clear();
+        // マスク参照も外しておく（破棄済み参照によるPixi内部エラー回避）
+        blackBand.mask = null;
+      } else if (progress >= 1) {
+        // 入場完了：マスクを外し、完全表示
+        this.clearSwipeInMaskFromBlackBand(blackBand, phraseId);
+        blackBand.visible = true;
+      } else {
+        // 中間：マスクを適用して部分表示
+        blackBand.visible = true;
+        // 確定的マスク描画（時刻に対して一意に決定される）
+        this.applyDeterministicMask(swipeInMask, blackBand, deterministicMaskSize, phraseId);
+      }
       
       
     } catch (error) {
@@ -1413,6 +1709,10 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
           }
         }
         invertMask.name = `invert_mask_${phraseId}_word_${wordIndex}`;
+        // マスクはヒットテスト対象外
+        // @ts-ignore
+        (invertMask as any).eventMode = 'none';
+        (invertMask as any).interactive = false;
         
         // グラフィックコンテナに追加
         invertMaskContainer.addChild(invertMask);
@@ -2414,8 +2714,8 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
           if (!currentMask.destroyed) {
             currentMask.destroy({
               children: true,
-              texture: false,
-              baseTexture: false
+              texture: true,
+              baseTexture: true
             });
           }
         }
@@ -2428,8 +2728,8 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
         if (!maskToRemove.destroyed) {
           maskToRemove.destroy({
             children: true,
-            texture: false,
-            baseTexture: false
+            texture: true,
+            baseTexture: true
           });
         }
       }
@@ -2504,6 +2804,10 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
       if (graphicsContainer && graphicsContainer.blackBandContainer && !graphicsContainer.blackBandContainer.destroyed) {
         try {
           graphicsContainer.blackBandContainer.mask = null;
+          // 子のマスクも念のため削除
+          graphicsContainer.blackBandContainer.children.forEach(c => {
+            try { (c as any).mask = null; } catch {}
+          });
         } catch (error) {
           // エラーは無視
         }
@@ -2591,8 +2895,8 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
           if (!maskToRemove.destroyed) {
             maskToRemove.destroy({
               children: true,
-              texture: false,
-              baseTexture: false
+              texture: true,
+              baseTexture: true
             });
           }
         } catch (error) {
@@ -2604,32 +2908,70 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
   }
 
   /**
+   * スワイプアウト時のスライス配列をクリーンアップ
+   */
+  private clearSwipeOutSlices(phraseId: string): void {
+    try {
+      const state = this.swipeOutStates.get(phraseId);
+      if (state?.slices) {
+        console.log(`[VERTICAL_BAND] clearSwipeOutSlices: phraseId=${phraseId}, スライス数=${state.slices.length}`);
+        
+        // 新しい統一された破棄メソッドを使用
+        const graphicsSlices = state.slices.map(slice => slice.graphics).filter(g => g) as PIXI.Graphics[];
+        this.destroyGraphicsSlices(graphicsSlices);
+        
+        // 配列をクリア
+        state.slices = [];
+      }
+    } catch (error) {
+      console.error(`[VERTICAL_BAND] clearSwipeOutSlices error for ${phraseId}:`, error);
+    }
+  }
+
+  /**
    * シンプルなフレーズグラフィック要素のクリーンアップ
    */
   private clearPhraseGraphics(phraseContainer: PIXI.Container): void {
     // フレーズ終了時のグラフィックコンテナクリーンアップ
     const phraseId = this.extractPhraseIdFromContainerName(phraseContainer.name || '');
     if (phraseId) {
+      // まず全てのマスク参照を外してから破棄
+      this.clearAllMaskReferences(phraseContainer);
       
       // グラフィックコンテナの完全削除
       const containers = this.graphicsContainers.get(phraseId);
       if (containers) {
         // 黒帯コンテナの削除
         if (containers.blackBandContainer && !containers.blackBandContainer.destroyed) {
-          containers.blackBandContainer.removeChildren();
-          if (containers.blackBandContainer.parent) {
-            containers.blackBandContainer.parent.removeChild(containers.blackBandContainer);
+          try {
+            // 念のためマスク解除
+            containers.blackBandContainer.mask = null;
+            containers.blackBandContainer.children.forEach(c => { try { (c as any).mask = null; } catch {} });
+            containers.blackBandContainer.removeChildren();
+            if (containers.blackBandContainer.parent) {
+              containers.blackBandContainer.parent.removeChild(containers.blackBandContainer);
+            }
+            containers.blackBandContainer.destroy({ children: true });
+            console.log(`[VERTICAL_BAND] 黒帯コンテナ削除完了: ${phraseId}`);
+          } catch (error) {
+            console.warn(`[VERTICAL_BAND] 黒帯コンテナ削除エラー ${phraseId}:`, error);
           }
-          containers.blackBandContainer.destroy({ children: true });
         }
         
         // 反転マスクコンテナの削除
         if (containers.invertMaskContainer && !containers.invertMaskContainer.destroyed) {
-          containers.invertMaskContainer.removeChildren();
-          if (containers.invertMaskContainer.parent) {
-            containers.invertMaskContainer.parent.removeChild(containers.invertMaskContainer);
+          try {
+            containers.invertMaskContainer.mask = null;
+            containers.invertMaskContainer.children.forEach(c => { try { (c as any).mask = null; } catch {} });
+            containers.invertMaskContainer.removeChildren();
+            if (containers.invertMaskContainer.parent) {
+              containers.invertMaskContainer.parent.removeChild(containers.invertMaskContainer);
+            }
+            containers.invertMaskContainer.destroy({ children: true });
+            console.log(`[VERTICAL_BAND] 反転マスクコンテナ削除完了: ${phraseId}`);
+          } catch (error) {
+            console.warn(`[VERTICAL_BAND] 反転マスクコンテナ削除エラー ${phraseId}:`, error);
           }
-          containers.invertMaskContainer.destroy({ children: true });
         }
         
         // マップから削除
@@ -2703,6 +3045,10 @@ export class VerticalBlackBandTextPrimitive implements IAnimationTemplate {
     // 新規マスク作成
     const newMask = new PIXI.Graphics();
     newMask.name = maskName;
+    // インタラクション無効
+    // @ts-ignore
+    (newMask as any).eventMode = 'none';
+    (newMask as any).interactive = false;
     blackBand.parent.addChild(newMask);
     
     return newMask;

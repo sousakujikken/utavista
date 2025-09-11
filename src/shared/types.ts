@@ -44,11 +44,33 @@ export interface ExportOptions {
 }
 
 export interface ExportProgress {
-  phase: 'preparing' | 'generating' | 'encoding' | 'finalizing';
-  progress: number; // 0-100
+  // Broadened to cover both legacy and lockstep phases
+  phase:
+    | 'preparing'
+    | 'generating'
+    | 'encoding'
+    | 'finalizing'
+    | 'capturing'
+    | 'batch_creation'
+    | 'composition'
+    | 'background_prep'
+    | 'muxing';
+  // Legacy overall progress (0-100)
+  progress?: number;
+  // Newer overall progress (0-100) used by renderer exporter
+  overallProgress?: number;
+  // Step-wise information for multi-phase reporting
+  stepIndex?: number; // 1-based index
+  stepCount?: number; // total steps
+  stepName?: string;
+  stepProgress?: number; // 0-1 for current step
+  etaSeconds?: number; // estimated remaining time (seconds)
+  // Optional session for correlating events
+  sessionId?: string;
+  // Frame-specific fields (when relevant)
   currentFrame?: number;
   totalFrames?: number;
-  timeRemaining?: number;
+  timeRemaining?: number; // legacy field (ms)
   message?: string;
 }
 
@@ -93,4 +115,10 @@ export interface RendererToMainChannels {
   'export:frame-ready': (frameData: string) => void;
   'export:frame-error': (error: string) => void;
   'font:get-system-fonts': () => Promise<FontInfo[]>;
+
+  // WebCodecs lockstep export
+  'export:webcodecs:start': (options: any) => Promise<void>;
+  'export:webcodecs:chunk': (payload: any) => Promise<void>;
+  'export:webcodecs:finalize': (options: any) => Promise<string>;
+  'export:webcodecs:cancel': (options: any) => Promise<void>;
 }

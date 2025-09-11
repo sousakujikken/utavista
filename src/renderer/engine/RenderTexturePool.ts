@@ -20,8 +20,15 @@ export class RenderTexturePool {
    * @param poolSize プールサイズ（推奨: 3-5個）
    */
   constructor(width: number, height: number, poolSize: number = 5) {
-    this.width = width;
-    this.height = height;
+    // 安全のため整数化
+    const intWidth = Math.round(width);
+    const intHeight = Math.round(height);
+    if (intWidth !== width || intHeight !== height) {
+      // ここでの丸めはログのみ（UI分解能とズレる状況の検出用）
+      console.warn(`RenderTexturePool: non-integer size (${width}x${height}) -> using ${intWidth}x${intHeight}`);
+    }
+    this.width = intWidth;
+    this.height = intHeight;
     this.poolSize = poolSize;
     
     // プール内のテクスチャを事前作成

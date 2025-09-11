@@ -80,6 +80,115 @@ export class SystemFFmpegWrapper {
       return 'ffmpeg';
     }
   }
+
+  /**
+   * Extract background frames as JPEG sequence for deterministic lockstep.
+   */
+  async extractFrames(options: {
+    inputPath: string;
+    outputDir: string;
+    fps: number;
+    width: number;
+    height: number;
+    startTimeMs: number;
+    endTimeMs: number;
+    quality?: number; // 2(best)-31(worst)
+    fitMode?: 'cover' | 'contain' | 'stretch';
+  }, progressCallback?: (progress: FFmpegProgress) => void): Promise<{ framesDir: string; count: number }> {
+    const path = await import('path');
+    const fs = await import('fs/promises');
+    await fs.mkdir(options.outputDir, { recursive: true });
+    const pattern = path.join(options.outputDir, 'bg_%06d.jpg');
+    const durationSec = Math.max(0, (options.endTimeMs - options.startTimeMs) / 1000);
+    // Build filter to preserve aspect ratio according to fitMode
+    const outW = options.width;
+    const outH = options.height;
+    const fit = options.fitMode ?? 'cover';
+    let filter: string;
+    if (fit === 'stretch') {
+      // direct scale to WxH
+      filter = `scale=${outW}:${outH}`;
+    } else if (fit === 'contain') {
+      // keep AR, pad to WxH
+      // scale down/up to fit within WxH, then pad centered
+      filter = `scale=${outW}:${outH}:force_original_aspect_ratio=decrease,pad=${outW}:${outH}:(ow-iw)/2:(oh-ih)/2:black`;
+    } else {
+      // cover: fill WxH, cropping excess
+      filter = `scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH}`;
+    }
+    const args = [
+      '-ss', (options.startTimeMs / 1000).toFixed(3),
+      '-t', durationSec.toFixed(3),
+      '-i', options.inputPath,
+      '-r', options.fps.toString(),
+      '-vf', filter,
+      '-q:v', String(options.quality ?? 2),
+      '-start_number', '0',
+      '-y', pattern
+    ];
+    await this.executeFFmpeg(args, progressCallback);
+
+    // Count frames
+    const files = await fs.readdir(options.outputDir);
+    const count = files.filter(f => f.startsWith('bg_') && f.endsWith('.jpg')).length;
+    return { framesDir: options.outputDir, count };
+  }
+
+  /**
+   * Mux H.264 elementary stream (+ optional audio) into MP4.
+   * Tries stream copy first; if it fails, falls back to re-encode.
+   */
+  async muxH264Elementary(options: {
+    h264Path: string;
+    outputFileName: string;
+    fps: number;
+    width: number;
+    height: number;
+    audioPath?: string;
+    outputPath?: string; // full path
+    totalFrames?: number;
+    totalDurationMs?: number;
+  }, progressCallback?: (progress: FFmpegProgress) => void): Promise<string> {
+    const path = await import('path');
+    const fs = await import('fs/promises');
+    const outDir = options.outputPath ? path.dirname(options.outputPath) : (process.env.HOME ? path.join(process.env.HOME, 'Desktop') : path.dirname(options.h264Path));
+    const outPath = options.outputPath ? options.outputPath : path.join(outDir, options.outputFileName);
+
+    // Raw H.264 elementary stream input
+    const baseArgs = [
+      '-fflags', '+genpts',
+      '-probesize', '100M',
+      '-analyzeduration', '100M',
+      '-f', 'h264',
+      '-framerate', options.fps.toString(),
+      '-i', options.h264Path
+    ];
+
+    const audioArgs = options.audioPath ? ['-i', options.audioPath, '-c:a', 'aac'] : [];
+
+    // Re-encode with libx264 to embed explicit CFR/fps metadata (most compatible)
+    const args = [
+      ...baseArgs,
+      ...audioArgs,
+      // Force CFR at the filter level to normalize timestamps
+      '-vf', `fps=${options.fps}:round=up`,
+      // Encoder/output FPS
+      '-r', options.fps.toString(),
+      // If total frames known, enforce; else if duration known, enforce duration
+      ...(options.totalFrames ? ['-frames:v', String(options.totalFrames)] : []),
+      ...(options.totalDurationMs ? ['-t', (options.totalDurationMs / 1000).toFixed(3)] : []),
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-preset', 'medium',
+      '-crf', '18',
+      // MP4 timescale to avoid odd avg_frame_rate readings
+      '-video_track_timescale', (options.fps * 1000).toString(),
+      '-movflags', '+faststart',
+      '-y', outPath
+    ];
+    await this.executeFFmpeg(args, progressCallback);
+    return outPath;
+  }
   
   /**
    * FFmpegの利用可能性をチェック

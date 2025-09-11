@@ -78,6 +78,50 @@ const electronAPI = {
     usagePercent: number;
   }> =>
     ipcRenderer.invoke('export:getStorageStats', sessionId),
+
+  // WebCodecs lockstep export
+  webcodecsStart: (options: {
+    sessionId: string;
+    fileName: string;
+    fps: number;
+    width: number;
+    height: number;
+    audioPath?: string;
+    outputPath?: string;
+    totalFrames?: number;
+    totalDurationMs?: number;
+  }): Promise<void> => ipcRenderer.invoke('export:webcodecs:start', options),
+
+  webcodecsSendChunk: (payload: {
+    sessionId: string;
+    data: Uint8Array;
+    isKey: boolean;
+    timestamp: number;
+    duration?: number;
+  }): Promise<void> => ipcRenderer.invoke('export:webcodecs:chunk', payload),
+
+  webcodecsFinalize: (options: { sessionId: string }): Promise<string> =>
+    ipcRenderer.invoke('export:webcodecs:finalize', options),
+
+  webcodecsCancel: (options: { sessionId: string }): Promise<void> =>
+    ipcRenderer.invoke('export:webcodecs:cancel', options),
+
+  // Optional: compute deterministic lockstep timeline in main/native plugin
+  webcodecsGetTimeline: (options: { fps: number; startTimeMs: number; endTimeMs: number }): Promise<number[]> =>
+    ipcRenderer.invoke('export:webcodecs:timeline', options),
+
+  webcodecsExtractBgFrames: (options: {
+    sessionId: string;
+    videoPath: string;
+    fps: number;
+    width: number;
+    height: number;
+    startTimeMs: number;
+    endTimeMs: number;
+    quality?: number;
+    fitMode?: 'cover' | 'contain' | 'stretch';
+  }): Promise<{ framesDir: string; count: number }> =>
+    ipcRenderer.invoke('export:webcodecs:extract-bg-frames', options),
   
   // Event listeners for export process
   onExportProgress: (callback: (progress: ExportProgress) => void) => {

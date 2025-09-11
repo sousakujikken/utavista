@@ -27,6 +27,13 @@ export class AnimationInstance {
   private static lastLogTime = 0;
   private static LOG_THROTTLE_MS = 1000; // 1秒ごとにのみログを出力
 
+  // シークバック検知用の直近更新時刻
+  private _lastNowMs: number | null = null;
+  // シークバック時クリーンアップの多重実行抑制
+  private _reverseCleaned: boolean = false;
+  // 時間範囲外でのクリーンアップを多重実行しないためのフラグ
+  private _cleanedOut: boolean = false;
+
   constructor(
     id: string,
     template: IAnimationTemplate,
@@ -109,6 +116,8 @@ export class AnimationInstance {
       // 安全にコンテナの表示状態を確保
       this.isActive = true;
       this.container.visible = true;
+      // 可視フレームに入ったので、アウト時クリーンフラグを解除
+      this._cleanedOut = false;
       
       // 文字レベルの場合は、位置と名前を再確認
       if (this.hierarchyType === 'char') {
@@ -133,7 +142,23 @@ export class AnimationInstance {
       
       // 現在のアニメーションフェーズを判定
       const phase = this.determineAnimationPhase(nowMs);
-      
+
+      // シークバック（時間が戻る）時は一度だけ視覚要素をリセット
+      if (this._lastNowMs !== null && nowMs < this._lastNowMs - 10) {
+        if (!this._reverseCleaned && this.template && typeof (this.template as any).removeVisualElements === 'function') {
+          try {
+            (this.template as any).removeVisualElements(this.container);
+          } catch {
+            // noop
+          } finally {
+            this._reverseCleaned = true;
+          }
+        }
+      } else if (this._lastNowMs !== null && nowMs >= this._lastNowMs) {
+        // 前進に転じたら解除
+        this._reverseCleaned = false;
+      }
+
       
       // 子要素のコンテナ状態は維持したまま、このコンテナの変形のみを処理
       try {
@@ -179,6 +204,8 @@ export class AnimationInstance {
           }
         }
         
+        // 次回比較用に現在時刻を保存
+        this._lastNowMs = nowMs;
         return true;
       } catch (error) {
         console.error(`AnimationInstance.update: アニメーション適用エラー ${this.id}:`, error);
@@ -202,11 +229,13 @@ export class AnimationInstance {
     // 非表示のログ出力を制限（フレーズレベルのみ）
     
     // テンプレートのremoveVisualElementsがある場合は呼び出してクリーンアップ
-    if (this.template.removeVisualElements && typeof this.template.removeVisualElements === 'function') {
+    if (!this._cleanedOut && this.template.removeVisualElements && typeof this.template.removeVisualElements === 'function') {
       try {
         this.template.removeVisualElements(this.container);
       } catch (error) {
         console.error(`hideOutOfRange: removeVisualElementsエラー ${this.id}:`, error);
+      } finally {
+        this._cleanedOut = true;
       }
     }
     
@@ -241,5 +270,4 @@ export class AnimationInstance {
     this.isActive = false;
   }
 }
-
 export default AnimationInstance;

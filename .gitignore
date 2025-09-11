@@ -39,3 +39,5 @@ src/renderer/templates/old/
 # Claude Code settings
 .claude/
 
+# Validation reports (generated)
+validation-reports/

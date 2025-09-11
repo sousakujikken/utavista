@@ -213,13 +213,22 @@ export class NativeVideoFrameExtractor {
    */
   destroy(): void {
     if (this.videoElement) {
-      this.videoElement.pause();
-      this.videoElement.removeAttribute('src');
-      this.videoElement.load();
+      try {
+        this.videoElement.pause();
+        this.videoElement.removeAttribute('src');
+        this.videoElement.load();
+      } catch {}
       this.videoElement = null;
     }
     
-    this.offscreenCanvas = null;
+    if (this.offscreenCanvas) {
+      try {
+        // サイズを0にして裏側のIOSurface/バックバッファを解放させる
+        (this.offscreenCanvas as any).width = 0;
+        (this.offscreenCanvas as any).height = 0;
+      } catch {}
+      this.offscreenCanvas = null;
+    }
     this.frameCache.clear();
     
   }

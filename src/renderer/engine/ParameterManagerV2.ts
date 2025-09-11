@@ -251,8 +251,17 @@ export class ParameterManagerV2 {
       }
     }
     
-    // パラメータを検証
-    const validation = ParameterValidator.validate(updates);
+    // テンプレートID文脈でパラメータを検証（テンプレート固有パラメータ対応）
+    let templateIdForValidation: string = '';
+    // 1) 内部記録されたテンプレートIDを優先
+    templateIdForValidation = this.phraseTemplates.get(phraseId) || '';
+    // 2) 未取得の場合はTemplateManagerから割り当てを取得
+    if (!templateIdForValidation && this.templateManager && typeof this.templateManager.getAssignment === 'function') {
+      try {
+        templateIdForValidation = this.templateManager.getAssignment(phraseId) || '';
+      } catch {}
+    }
+    const validation = ParameterValidator.validate(updates, templateIdForValidation as any);
     if (!validation.isValid) {
       console.warn('Parameter validation errors:', validation.errors);
     }
@@ -537,7 +546,14 @@ export class ParameterManagerV2 {
       // 個別設定がない場合は空文字（デフォルト使用）
       
       const sanitizedTemplateId = templateId ? this.sanitizeTemplateId(templateId) : '';
-      const diff = this.calculateDiff(this.globalDefaults, params);
+      
+      // 重要: 個別設定フレーズは完全なスナップショットを保存してグローバル変更の影響を遮断
+      let diff: Partial<StandardParameters>;
+      if (isIndividual) {
+        diff = JSON.parse(JSON.stringify(params));
+      } else {
+        diff = this.calculateDiff(this.globalDefaults, params);
+      }
       
       // 開発時のみログ出力（高頻度なので通常は抑制）
       if (import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
@@ -592,13 +608,22 @@ export class ParameterManagerV2 {
       let params: CompleteParameters;
       
       if (isIndividualEnabled && compressedPhrase.parameterDiff) {
-        // 個別設定が有効な場合：グローバルデフォルト＋差分のみ適用
-        // テンプレートデフォルトは適用しない（個別設定を保護）
-        params = { ...this.globalDefaults };
-        
-        // 差分を適用
-        Object.assign(params, compressedPhrase.parameterDiff);
-        
+        // 個別設定が有効な場合：保存時のスナップショット優先
+        // 後方互換のため、差分形式（旧データ）もサポート
+        const diffKeys = Object.keys(compressedPhrase.parameterDiff);
+        const totalKeys = Object.keys(this.globalDefaults).length || 1;
+        const looksLikeSnapshot = diffKeys.length > totalKeys / 2; // 大半のキーを含む場合はスナップショットと判断
+
+        if (looksLikeSnapshot) {
+          // スナップショットとしてそのまま使用（独立性を保証）
+          params = { ...this.createDefaultParameters() };
+          Object.assign(params, compressedPhrase.parameterDiff);
+        } else {
+          // 旧形式の差分として扱い、当時のグローバル相当（現行globalDefaults）に上書き
+          // これにより過去データも破綻せず読み込める
+          params = { ...this.globalDefaults };
+          Object.assign(params, compressedPhrase.parameterDiff);
+        }
       } else {
         // 個別設定が無効な場合：正しい優先順位で適用
         // 1. システムデフォルトから開始
