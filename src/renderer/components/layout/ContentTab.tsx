@@ -4,6 +4,7 @@ import { electronMediaManager } from '../../services/ElectronMediaManager';
 import { logger } from '../../../utils/logger';
 import { AspectRatio, Orientation, BackgroundType, BackgroundFitMode } from '../../types/types';
 import { Button, Select, Section, StatusMessage } from '../common';
+import BeatDetectionPanel from './BeatDetectionPanel';
 import '../../styles/components.css';
 
 interface ContentTabProps {
@@ -368,7 +369,7 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
       {/* 歌詞セクション */}
       <Section title="歌詞データ">
         <div className="u-flex u-gap-sm u-mb-md">
-          <Button variant="primary" onClick={handleLyricsFileSelect}>
+          <Button variant="secondary" onClick={handleLyricsFileSelect}>
             JSONファイルを読み込み
           </Button>
           
@@ -419,8 +420,6 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
         )}
       </Section>
 
-      <hr className="u-divider" />
-
       {/* 音楽セクション */}
       <Section title="音楽データ">
         <div className="u-mb-md">
@@ -432,7 +431,7 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
         {/* 最近使用したファイル */}
         {recentFiles.length > 0 && (
           <Select 
-            label="最近使用したファイル:"
+            label="最近使用したファイル"
             onChange={async (e) => {
               if (e.target.value && engine) {
                 const selectedFile = recentFiles.find(f => f.filePath === e.target.value);
@@ -535,12 +534,12 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
         </div>
       </Section>
 
-      <hr className="u-divider" />
+      <BeatDetectionPanel engine={engine} />
 
       {/* アスペクト比・向きセクション */}
       <Section title="表示設定">
         <Select
-          label="アスペクト比・向き:"
+          label="アスペクト比・向き"
           value={`${currentAspectRatio}-${currentOrientation}`}
           onChange={(e) => handleAspectRatioChange(e.target.value)}
         >
@@ -552,12 +551,10 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
         </Select>
       </Section>
 
-      <hr className="u-divider" />
-
       {/* 背景セクション */}
       <Section title="背景設定">
         <Select
-          label="背景タイプ:"
+          label="背景タイプ"
           value={backgroundType}
           onChange={(e) => {
             const newType = e.target.value as BackgroundType;
@@ -568,11 +565,19 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
           <option value="color">単色</option>
           <option value="image">画像</option>
           <option value="video">動画</option>
+          <option value="transparent">透過</option>
         </Select>
+
+        {backgroundType === 'transparent' && (
+          <p className="u-mt-md u-text-secondary">
+            背景を描かず、文字と装飾だけをアルファチャンネル付きで描画します。プレビューの市松模様は書き出されません。
+            動画出力は透過に対応した ProRes 4444（.mov）になります。
+          </p>
+        )}
 
         {backgroundType === 'color' && (
           <div className="u-mt-md">
-            <label className="u-text-secondary u-mb-xs">背景色:</label>
+            <label className="u-text-secondary u-mb-xs">背景色</label>
             <input
               type="color"
               value={backgroundColor}
@@ -593,7 +598,8 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
                 try {
                   const result = await electronMediaManager.loadBackgroundImage();
                   if (result && engine) {
-                    const { imageUrl, fileName } = result;
+                    const { imageUrl } = result;
+                    await engine.setBackgroundImage(imageUrl, fitMode);
                     setBackgroundImageUrl(imageUrl);
                     updateBackgroundConfig({ imageFilePath: imageUrl });
                     
@@ -652,7 +658,7 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
             {/* 最近使用したファイル */}
             {recentVideoFiles.length > 0 && (
               <Select 
-                label="最近使用したファイル:"
+                label="最近使用したファイル"
                 onChange={async (e) => {
                   if (e.target.value && engine) {
                     const selectedFile = recentVideoFiles.find(f => f.filePath === e.target.value);
@@ -720,7 +726,7 @@ const ContentTab: React.FC<ContentTabProps> = ({ engine, onLyricsEditModeToggle 
         {(backgroundType === 'image' || backgroundType === 'video') && (
           <>
             <Select
-              label="フィットモード:"
+              label="フィットモード"
               value={fitMode}
               onChange={(e) => {
                 const newFitMode = e.target.value as BackgroundFitMode;

@@ -1,34 +1,10 @@
 {
   "templates": [
     {
-      "id": "blinkfadetextprimitive_v2",
-      "name": "点滅フェードテキスト v2.0",
-      "importPath": "./BlinkFadeTextPrimitive_v2",
-      "exportName": "BlinkFadeTextPrimitive_v2"
-    },
-    {
-      "id": "pureprimitivewordslidetext",
-      "name": "完全プリミティブベース単語スライドテキスト",
-      "importPath": "./PurePrimitiveWordSlideText",
-      "exportName": "PurePrimitiveWordSlideText"
-    },
-    {
-      "id": "verticaltexttemplate",
-      "name": "縦書きテキストテンプレート",
-      "importPath": "./VerticalTextTemplate",
-      "exportName": "VerticalTextTemplate"
-    },
-    {
-      "id": "blackbandmasktextprimitive",
-      "name": "黒帯マスク文字反転テキスト",
-      "importPath": "./BlackBandMaskTextPrimitive",
-      "exportName": "BlackBandMaskTextPrimitive"
-    },
-    {
-      "id": "verticalblackbandtextprimitive",
-      "name": "縦書き黒帯スワイプテキスト",
-      "importPath": "./VerticalBlackBandTextPrimitive",
-      "exportName": "VerticalBlackBandTextPrimitive"
+      "id": "kineticscenetemplate",
+      "name": "キネティック・シーンコンポーザー",
+      "importPath": "./KineticSceneTemplate",
+      "exportName": "KineticSceneTemplate"
     }
   ]
 }

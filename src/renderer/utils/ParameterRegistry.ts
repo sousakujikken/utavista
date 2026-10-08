@@ -62,6 +62,14 @@ export class ParameterRegistry {
       defaultValue: DEFAULT_PARAMETERS.fontFamily,
       description: 'フォントファミリー'
     });
+
+    this.registerParameter({
+      name: 'fontWeight',
+      type: 'string',
+      category: 'standard',
+      defaultValue: DEFAULT_PARAMETERS.fontWeight,
+      description: 'フォントウェイト'
+    });
     
     // === 色設定 ===
     this.registerParameter({

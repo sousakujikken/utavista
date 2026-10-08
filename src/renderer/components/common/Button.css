@@ -71,6 +71,18 @@
   background-color: var(--color-danger-hover);
 }
 
+/* 削除など取り消せない操作を、主操作より目立たせずに示す */
+.common-button--danger-outline {
+  background-color: transparent;
+  color: #ff8b8b;
+  border: 1px solid rgba(220, 53, 69, 0.6);
+}
+
+.common-button--danger-outline:hover:not(:disabled) {
+  background-color: rgba(220, 53, 69, 0.15);
+  border-color: var(--color-danger);
+}
+
 .common-button--warning {
   background-color: var(--color-warning);
   color: white;

@@ -403,3 +403,57 @@
   line-height: 1.4;
   font-family: var(--font-primary);
 }
+
+/* 設定タブ（カード・見出しは共通の .common-section に従う） */
+.app-settings-description {
+  margin: 0 0 var(--space-md);
+  color: var(--text-muted);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.app-settings-list {
+  margin: 0;
+}
+
+.app-settings-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+}
+
+.app-settings-list > div + div {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.app-settings-list dt {
+  color: var(--text-secondary);
+}
+
+.app-settings-list dd {
+  margin: 0;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* 開発者向けデバッグ情報（折りたたみ） */
+.app-settings-debug > summary.common-section-title {
+  margin: 0;
+  cursor: pointer;
+}
+
+.app-settings-debug[open] > summary.common-section-title {
+  margin-bottom: var(--space-md);
+}
+
+.app-settings-debug .debug-tab {
+  height: auto;
+  padding: 0;
+  background: transparent;
+}
+
+/* 折りたたみの見出しと重複するため、デバッグ情報内の見出しは表示しない */
+.app-settings-debug .debug-tab > h3 {
+  display: none;
+}

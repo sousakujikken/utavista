@@ -21,6 +21,13 @@ import { UnifiedRestoreManager } from './UnifiedRestoreManager';
 import { SparkleEffectPrimitive } from '../primitives/effects/SparkleEffectPrimitive';
 import { ProjectFileData, AutoSaveData } from '../../types/UnifiedProjectData';
 import { OptimizedParameterUpdater } from './OptimizedParameterUpdater';
+import { BeatManager, BeatEventDetail } from '../services/BeatManager';
+import type { BeatMarker } from '../services/AudioAnalyzer';
+import {
+  DEFAULT_POST_EFFECT_CONFIG,
+  GlobalPostEffectConfig,
+  GlobalPostEffectManager
+} from '../effects/GlobalPostEffectManager';
 
 export class Engine {
   // パラメータカテゴリ分類
@@ -63,6 +70,40 @@ export class Engine {
   audioDuration: number = 10000; // デフォルト10秒
   audioFilePath?: string; // 音楽ファイルパス
   audioFileName?: string; // 音楽ファイル名
+  private currentAudioElement?: HTMLAudioElement;
+  // タイムラインはメディア要素の currentTime に依存させない。
+  // Chromium のメディア時計が一時停止しても、プレビュー時間は単調に進む。
+  private playbackAnchorTimeMs: number = 0;
+  private playbackAnchorPerformanceMs: number = 0;
+  private lastPlaybackHealthLogMs: number = 0;
+  private lastObservedAudioTimeMs: number = 0;
+  private lastAudioProgressPerformanceMs: number = 0;
+  private readonly audioDiagnosticEvents = [
+    'play', 'playing', 'pause', 'waiting', 'stalled', 'suspend',
+    'seeking', 'seeked', 'canplay', 'error'
+  ] as const;
+  private readonly handleAudioDiagnosticEvent = (event: Event) => {
+    const audio = event.currentTarget as HTMLAudioElement | null;
+    if (!audio) return;
+    console.log(`[Engine] Audio event: ${event.type}`, {
+      currentTime: audio.currentTime,
+      paused: audio.paused,
+      ended: audio.ended,
+      readyState: audio.readyState,
+      networkState: audio.networkState,
+      errorCode: audio.error?.code
+    });
+  };
+  private readonly handleCurrentAudioEnded = () => {
+    this.currentTime = this.audioDuration;
+    this.pause();
+    this.dispatchCustomEvent('audio-ended', {
+      currentTime: this.currentTime,
+      audioFileName: this.audioFileName
+    });
+  };
+  readonly beatManager = new BeatManager();
+  private postEffectManager!: GlobalPostEffectManager;
 
   // 方眼目盛りと座標表示用のオーバーレイ
   private gridOverlay?: GridOverlay;
@@ -86,6 +127,7 @@ export class Engine {
   // 背景レイヤー関連
   private backgroundLayer: PIXI.Container;
   private backgroundSprite?: PIXI.Sprite;
+  private backgroundImageLoadId = 0;
   private backgroundVideo?: HTMLVideoElement;
   private backgroundVideoSprite?: PIXI.Sprite;
   private backgroundConfig: BackgroundConfig = {
@@ -100,6 +142,7 @@ export class Engine {
   private autoSaveTimer?: number;
   private lastAutoSaveTime: number = 0;
   private autoSaveEnabled: boolean = true;
+  private autoRestoreSettled: Promise<void> = Promise.resolve();
   private static readonly AUTO_SAVE_INTERVAL = 30000; // 30秒
   private static readonly AUTO_SAVE_EXPIRY = 24 * 60 * 60 * 1000; // 24時間
   
@@ -110,10 +153,16 @@ export class Engine {
     containerId: string, 
     template: IAnimationTemplate,
     defaultParams: Partial<StandardParameters> = {},
-    templateId: string = 'fadeslidetext'
+    templateId: string = 'kineticscenetemplate'
   ) {
-    // グローバル参照を設定（パーティクルシステムなどから時刻取得用）
+    // 開発時のFast RefreshやStrictModeでも描画エンジンを多重起動させない。
+    // 多重Tickerは再生を数フレーム/秒まで低下させ、音声や自動保存も重複させる。
     if (typeof window !== 'undefined') {
+      const previousEngine = (window as any).engineInstance as Engine | undefined;
+      if (previousEngine && previousEngine !== this) {
+        console.warn('[Engine] 既存のエンジンを破棄して二重初期化を防止します');
+        previousEngine.destroy();
+      }
       (window as any).engineInstance = this;
     }
     
@@ -137,7 +186,8 @@ export class Engine {
       templateAssignments: {},
       globalParams: { ...defaultParams },
       objectParams: {},
-      defaultTemplateId: templateId
+      defaultTemplateId: templateId,
+      postEffectConfig: { ...DEFAULT_POST_EFFECT_CONFIG }
     });
     
     // 個別設定変更リスナーの登録
@@ -174,9 +224,13 @@ export class Engine {
       width: width,
       height: height,
       backgroundColor: 0x000000,
+      // WebGLコンテキストのalpha有無は生成時のbackgroundAlphaで決まる。
+      // 透過背景へ切り替えられるようalpha付きで生成し、直後に不透明へ戻す。
+      backgroundAlpha: 0,
       resolution: 1, // 常に1で固定（スケーリングはCSSで行う）
       antialias: true,
     });
+    this.app.renderer.background.alpha = 1;
 
     // PIXIアプリケーションの初期化完了を待つ
     if (this.app.init) {
@@ -242,6 +296,10 @@ export class Engine {
     // ステージの原点を明示的に設定 (左上を(0, 0)にする)
     this.app.stage.position.set(0, 0);
 
+    // 背景・文字・装飾を合成した後のステージ全体へ共通Post FXを適用する。
+    this.postEffectManager = new GlobalPostEffectManager(this.app.stage);
+    this.postEffectManager.resize(this.app.screen);
+
     // 方眼目盛りオーバーレイを初期化
     this.gridOverlay = new GridOverlay(this.app);
     this.gridOverlay.setVisible(false); // デフォルトは非表示
@@ -276,21 +334,33 @@ export class Engine {
     this.setupAutoSave();
     
     // 起動時に自動保存データの復元を試みる（PIXI初期化後に実行）
-    setTimeout(async () => {
-      try {
-        // PIXIアプリケーションの初期化が完了するまで待機
-        await this.waitForPixiInitialization();
-        
-        // まずステージ設定だけを先に適用
-        await this.initializeStageConfigFromAutoSave();
-        
-        // 自動復元を実行（ダイアログなし）
-        await this.silentAutoRestore();
-        
-      } catch (error) {
-        console.error('Engine: 自動保存データの確認でエラーが発生しました:', error);
-      }
-    }, 100);
+    this.autoRestoreSettled = new Promise<void>(resolve => {
+      setTimeout(async () => {
+        try {
+          // PIXIアプリケーションの初期化が完了するまで待機
+          await this.waitForPixiInitialization();
+
+          // まずステージ設定だけを先に適用
+          await this.initializeStageConfigFromAutoSave();
+
+          // 自動復元を実行（ダイアログなし）
+          await this.silentAutoRestore();
+
+        } catch (error) {
+          console.error('Engine: 自動保存データの確認でエラーが発生しました:', error);
+        } finally {
+          resolve();
+        }
+      }, 100);
+    });
+  }
+
+  /**
+   * 起動時の自動保存データの復元が終わったら解決する。
+   * 関連付けで開いた .uta などを読み込む前に待つことで、後から終わった自動復元に上書きされないようにする。
+   */
+  whenAutoRestoreSettled(): Promise<void> {
+    return this.autoRestoreSettled;
   }
 
   // PIXIアプリケーションの初期化完了を待機
@@ -384,6 +454,22 @@ export class Engine {
         this.autoSaveToLocalStorage();
         console.log('Engine.loadLyrics: ローカルストレージへの自動保存が完了しました');
       }
+
+      // 読み込み完了時点をUndoの基準状態にする。
+      const parameterData = this.parameterManager.exportCompressed();
+      this.projectStateManager.updateCurrentState({
+        lyricsData: JSON.parse(JSON.stringify(this.phrases)),
+        currentTime: this.currentTime,
+        templateAssignments: this.templateManager.exportAssignments(),
+        globalParams: this.parameterManager.getGlobalDefaults(),
+        objectParams: parameterData.phrases as Record<string, Record<string, any>>,
+        individualSettingsEnabled: this.parameterManager.getIndividualSettingsEnabled(),
+        parameterData,
+        defaultTemplateId: this.templateManager.getDefaultTemplateId(),
+        postEffectConfig: this.getPostEffectConfig()
+      });
+      this.projectStateManager.resetHistoryToCurrent('歌詞読み込み完了');
+      this.dispatchUndoRedoStateChanged();
       
       console.log('Engine.loadLyrics: 歌詞データのロードが正常に完了しました');
     } catch (error) {
@@ -469,10 +555,11 @@ export class Engine {
       lyricsMaxTime = Math.max(...this.phrases.map(phrase => phrase.end));
     }
     
-    // 音楽データの長さを取得
+    // 音楽データの長さを取得。ElectronではネイティブAudio要素を優先する。
     let musicMaxTime = 0;
-    if (this.audioPlayer) {
-      const state = this.audioPlayer.state();
+    if (this.currentAudioElement && Number.isFinite(this.currentAudioElement.duration)) {
+      musicMaxTime = this.currentAudioElement.duration * 1000;
+    } else if (this.audioPlayer) {
       const duration = this.audioPlayer.duration ? this.audioPlayer.duration() : 0;
       
       if (this.audioPlayer.duration && duration > 0) {
@@ -765,7 +852,55 @@ export class Engine {
   }
 
   // アニメーションフレーム更新
-  private update(delta: number) {
+  private syncPlaybackClock(timeMs: number, now: number = performance.now()): void {
+    this.playbackAnchorTimeMs = timeMs;
+    this.playbackAnchorPerformanceMs = now;
+    this.lastPlaybackHealthLogMs = now;
+
+    if (this.currentAudioElement) {
+      this.lastObservedAudioTimeMs = this.currentAudioElement.currentTime * 1000;
+      this.lastAudioProgressPerformanceMs = now;
+    }
+  }
+
+  private logPlaybackHealth(now: number, timelineTimeMs: number): void {
+    const audio = this.currentAudioElement;
+    if (!audio) return;
+
+    const audioTimeMs = audio.currentTime * 1000;
+    if (audioTimeMs > this.lastObservedAudioTimeMs + 1) {
+      this.lastObservedAudioTimeMs = audioTimeMs;
+      this.lastAudioProgressPerformanceMs = now;
+    }
+
+    if (now - this.lastPlaybackHealthLogMs < 1000) return;
+
+    console.log('[Engine] Playback health', {
+      timelineTimeMs: Math.round(timelineTimeMs),
+      audioTimeMs: Math.round(audioTimeMs),
+      audioProgressStalledForMs: Math.round(now - this.lastAudioProgressPerformanceMs),
+      paused: audio.paused,
+      ended: audio.ended,
+      seeking: audio.seeking,
+      readyState: audio.readyState,
+      networkState: audio.networkState
+    });
+    this.lastPlaybackHealthLogMs = now;
+  }
+
+  private attachAudioDiagnostics(audio: HTMLAudioElement): void {
+    this.audioDiagnosticEvents.forEach(eventName => {
+      audio.addEventListener(eventName, this.handleAudioDiagnosticEvent);
+    });
+  }
+
+  private detachAudioDiagnostics(audio: HTMLAudioElement): void {
+    this.audioDiagnosticEvents.forEach(eventName => {
+      audio.removeEventListener(eventName, this.handleAudioDiagnosticEvent);
+    });
+  }
+
+  private update(_delta: number) {
     if (!this.isRunning) return;
     
     const now = performance.now();
@@ -784,25 +919,14 @@ export class Engine {
       return;
     }
     
-    // 音楽プレイヤーの現在再生位置を直接参照して同期
-    let newTime = this.currentTime;
-    
-    if (this.audioPlayer && this.audioPlayer.state() === 'loaded') {
-      // 音楽が読み込まれている場合は音楽の再生位置を参照（オフセットを逆計算）
-      try {
-        const audioCurrentTime = this.audioPlayer.seek() * 1000; // ミリ秒に変換
-        if (typeof audioCurrentTime === 'number' && !isNaN(audioCurrentTime)) {
-          const audioOffset = this.getAudioOffset();
-          newTime = audioCurrentTime - audioOffset; // オフセットを逆算してアニメーション時間を計算
-        }
-      } catch (error) {
-        // 音楽プレイヤーからの時間取得に失敗した場合は独立した時間進行にフォールバック
-        newTime = this.currentTime + (elapsed || this.app.ticker.deltaMS);
-      }
-    } else {
-      // 音楽が読み込まれていない場合は独立した時間進行
-      newTime = this.currentTime + (elapsed || this.app.ticker.deltaMS);
-    }
+    // performance.now() を唯一のタイムライン時計にする。音声の currentTime は
+    // Chromium/OS 側のバッファリングで止まる場合があるため、表示時刻の根拠にはしない。
+    const newTime = Math.max(
+      0,
+      this.playbackAnchorTimeMs + (now - this.playbackAnchorPerformanceMs)
+    );
+
+    this.logPlaybackHealth(now, newTime);
     
     // 終了時刻チェック - タイムライン終端で自動停止
     if (newTime >= this.audioDuration) {
@@ -814,9 +938,11 @@ export class Engine {
     
     this.currentTime = newTime;
     this.lastUpdateTime = now;
+    this.beatManager.update(this.currentTime);
     
     // インスタンスマネージャーの更新
     this.instanceManager.update(this.currentTime);
+    this.postEffectManager.update(this.currentTime);
     
     // デバッグ情報の更新（スロットリング付き）
     const debugElapsed = now - this.lastDebugUpdateTime;
@@ -828,17 +954,35 @@ export class Engine {
 
   // 再生制御メソッド
   play() {
+    if (this.isRunning) return;
+
+    const now = performance.now();
     this.isRunning = true;
-    this.lastUpdateTime = performance.now();
+    this.syncPlaybackClock(this.currentTime, now);
+    this.lastUpdateTime = now;
+    // GPU復帰やバックグラウンド遷移でTickerが停止していた場合も再開する。
+    if (!this.app.ticker.started) {
+      this.app.ticker.start();
+    }
     console.log('[Engine] 再生開始');
     
-    // 音声がある場合は再生（オフセットを適用）
-    if (this.audioPlayer && this.audioPlayer.state() === 'loaded') {
+    // Electronで読み込んだネイティブAudio要素を再生時計として使用する。
+    if (this.currentAudioElement) {
       const audioOffset = this.getAudioOffset();
-      const adjustedTime = Math.max(0, (this.currentTime + audioOffset) / 1000); // 秒単位に変換、負の値は0にクランプ
+      const adjustedTime = Math.max(0, (this.currentTime + audioOffset) / 1000);
+      this.currentAudioElement.playbackRate = 1;
+      this.currentAudioElement.currentTime = adjustedTime;
+      void this.currentAudioElement.play().catch(error => {
+        console.error('[Engine] 音楽再生の開始に失敗しました:', error);
+        // 音声だけが開始できなくても、映像プレビューの時計は止めない。
+        this.dispatchCustomEvent('audio-playback-error', { error: String(error) });
+      });
+      console.log(`[Engine] 音楽再生開始 - 現在時間: ${this.currentTime}ms, オフセット: ${audioOffset}ms, 調整後: ${adjustedTime}s`);
+    } else if (this.audioPlayer && this.audioPlayer.state() === 'loaded') {
+      const audioOffset = this.getAudioOffset();
+      const adjustedTime = Math.max(0, (this.currentTime + audioOffset) / 1000);
       this.audioPlayer.seek(adjustedTime);
       this.audioPlayer.play();
-      console.log(`[Engine] 音楽再生開始 - 現在時間: ${this.currentTime}ms, オフセット: ${audioOffset}ms, 調整後: ${adjustedTime}s`);
     } else {
       const state = this.audioPlayer ? this.audioPlayer.state() : 'none';
       console.warn(`Engine: 音声ファイルが読み込まれていないため、アニメーションのみ再生します (audioPlayer: ${this.audioPlayer ? '存在' : 'null'}, state: ${state})`);
@@ -852,11 +996,20 @@ export class Engine {
   }
 
   pause() {
+    if (this.isRunning) {
+      this.currentTime = Math.min(
+        this.audioDuration,
+        Math.max(0, this.playbackAnchorTimeMs + (performance.now() - this.playbackAnchorPerformanceMs))
+      );
+    }
     this.isRunning = false;
+    this.syncPlaybackClock(this.currentTime);
     console.log('[Engine] 再生停止');
     
     // 音声がある場合は一時停止
-    if (this.audioPlayer) {
+    if (this.currentAudioElement) {
+      this.currentAudioElement.pause();
+    } else if (this.audioPlayer) {
       this.audioPlayer.pause();
     }
     
@@ -867,12 +1020,23 @@ export class Engine {
   }
 
   reset() {
+    // 再生中に先頭へ戻した場合は、一度止めてから先頭で再生し直す。
+    // 止めずに音声だけ pause すると、タイムラインだけが進み音声が鳴らなくなる。
+    const wasRunning = this.isRunning;
+    if (wasRunning) this.pause();
+
     this.currentTime = 0;
+    this.syncPlaybackClock(0);
+    this.beatManager.sync(0);
     this.lastUpdateTime = 0;
     this.instanceManager.update(this.currentTime);
     
     // 音声がある場合はリセット（オフセットを適用）
-    if (this.audioPlayer) {
+    if (this.currentAudioElement) {
+      this.currentAudioElement.pause();
+      const audioOffset = this.getAudioOffset();
+      this.currentAudioElement.currentTime = Math.max(0, audioOffset / 1000);
+    } else if (this.audioPlayer) {
       this.audioPlayer.stop();
       const audioOffset = this.getAudioOffset();
       const adjustedTime = Math.max(0, audioOffset / 1000); // 秒単位に変換、負の値は0にクランプ
@@ -885,6 +1049,8 @@ export class Engine {
       this.backgroundVideo.pause();
       this.backgroundVideo.currentTime = 0;
     }
+
+    if (wasRunning) this.play();
   }
   
   // システムスリープ/ウェイクイベントのハンドラ設定
@@ -931,12 +1097,17 @@ export class Engine {
     const seekTimestamp = Date.now();
     
     this.currentTime = timeMs;
+    this.syncPlaybackClock(timeMs);
+    this.beatManager.sync(timeMs);
     this.lastUpdateTime = performance.now();
     
     this.instanceManager.update(this.currentTime);
     
     // 音声がある場合は再生中でなくてもシークを実行（オフセットを適用）
-    if (this.audioPlayer) {
+    if (this.currentAudioElement) {
+      const audioOffset = this.getAudioOffset();
+      this.currentAudioElement.currentTime = Math.max(0, (timeMs + audioOffset) / 1000);
+    } else if (this.audioPlayer) {
       // 一時停止中でも音声の位置を更新
       const audioOffset = this.getAudioOffset();
       const adjustedTime = Math.max(0, (timeMs + audioOffset) / 1000); // 秒単位に変換、負の値は0にクランプ
@@ -993,6 +1164,7 @@ export class Engine {
       
       // 時間を設定
       this.currentTime = timeMs;
+      this.beatManager.sync(timeMs);
       this.lastUpdateTime = performance.now();
       
       // インスタンスマネージャーを更新
@@ -1099,7 +1271,9 @@ export class Engine {
       // 再生状態を復元
       if (isCurrentlyPlaying) {
         this.isRunning = true;
-        this.lastUpdateTime = performance.now();
+        const now = performance.now();
+        this.syncPlaybackClock(currentTime, now);
+        this.lastUpdateTime = now;
       }
       
       return true;
@@ -1386,6 +1560,7 @@ export class Engine {
         individualSettingsEnabled: paramExport.individualSettingsEnabled || [],
         defaultTemplateId: this.templateManager.getDefaultTemplateId()
       });
+      this.saveUndoState('個別シーン設定の解除');
       
       return true;
     } catch (error) {
@@ -1511,53 +1686,61 @@ export class Engine {
    * HTMLAudioElement/HTMLVideoElementから音声を読み込み（Electron用）
    */
   loadAudioElement(audioElement: HTMLAudioElement | HTMLVideoElement, fileName?: string) {
-    
-    // AudioElementからHowlを作成
+    // ElectronMediaManagerのメタデータ取得用要素とは分離した、再生専用要素を持つ。
+    // 共有要素の preload=metadata や再ロード処理にプレビュー再生が巻き込まれるのを防ぐ。
     this.audioFileName = fileName || 'electron-audio';
+    if (this.currentAudioElement) {
+      this.currentAudioElement.removeEventListener('ended', this.handleCurrentAudioEnded);
+      this.detachAudioDiagnostics(this.currentAudioElement);
+      this.currentAudioElement.pause();
+      this.currentAudioElement.removeAttribute('src');
+      this.currentAudioElement.load();
+    }
+    if (this.audioPlayer) {
+      this.audioPlayer.unload();
+      this.audioPlayer = undefined;
+    }
+    const source = audioElement.currentSrc || audioElement.src;
+    const playbackAudio = new Audio();
+    playbackAudio.preload = 'auto';
+    playbackAudio.src = source;
+    this.currentAudioElement = playbackAudio;
+    this.currentAudioElement.addEventListener('ended', this.handleCurrentAudioEnded);
+    this.attachAudioDiagnostics(this.currentAudioElement);
+    this.currentAudioElement.pause();
+    this.currentAudioElement.load();
+    this.setBeatMarkers([]);
     
     // ElectronMediaManagerから現在のファイルパスを取得して更新（非同期）
     this.updateAudioFilePathFromElectronManager();
     
-    this.audioPlayer = new Howl({
-      src: [audioElement.src],
-      format: ['mp3', 'wav', 'ogg', 'm4a'],
-      html5: true,
-      preload: true, // Howlerでも確実にロード
-      onload: () => {
-        if (this.audioPlayer) {
-          const audioDuration = this.audioPlayer.duration() * 1000; // ミリ秒に変換
-          
-          // 歌詞データと音楽データの両方を考慮してタイムライン長さを再計算
-          this.calculateAndSetAudioDuration();
-          
-          // ProjectStateManagerに音楽ファイル情報を保存
-          this.projectStateManager.updateCurrentState({
-            audioFileName: this.audioFileName,
-            audioFileDuration: audioDuration
-          });
-          
-          // タイムライン更新イベントを発火
-          this.dispatchTimelineUpdatedEvent();
-          
-          
-          // 音声ファイルロード後に自動保存
-          if (this.autoSaveEnabled) {
-            this.autoSaveToLocalStorage();
-          }
-         }
-       },
-       onloaderror: (id: number, error: unknown) => {
-         console.error(`Engine: HTMLAudioElement音声ロードエラー (ID: ${id}):`, error);
-       },
-       onend: () => {
-         this.pause();
-         this.dispatchCustomEvent('audio-ended', { 
-           currentTime: this.currentTime,
-           audioFileName: this.audioFileName 
-         });
-       }
-    });
-    
+    const applyAudioMetadata = () => {
+      if (!this.currentAudioElement) return;
+      const audioDuration = Number.isFinite(this.currentAudioElement.duration)
+        ? this.currentAudioElement.duration * 1000
+        : 0;
+      this.calculateAndSetAudioDuration();
+      this.projectStateManager.updateCurrentState({
+        audioFileName: this.audioFileName,
+        audioFileDuration: audioDuration
+      });
+      this.dispatchTimelineUpdatedEvent();
+      if (this.autoSaveEnabled) this.autoSaveToLocalStorage();
+    };
+
+    if (this.currentAudioElement.readyState >= 1) {
+      applyAudioMetadata();
+    } else {
+      this.currentAudioElement.addEventListener('loadedmetadata', applyAudioMetadata, { once: true });
+    }
+  }
+
+  getAudioFilePath(): string | null {
+    return this.audioFilePath || null;
+  }
+
+  getAudioFileName(): string | null {
+    return this.audioFileName || null;
   }
   
   // タイムライン更新イベントを発火
@@ -1620,11 +1803,22 @@ export class Engine {
       if (this.audioPlayer) {
         this.audioPlayer.unload();
       }
+      if (this.currentAudioElement) {
+        this.currentAudioElement.removeEventListener('ended', this.handleCurrentAudioEnded);
+        this.detachAudioDiagnostics(this.currentAudioElement);
+        this.currentAudioElement.pause();
+        this.currentAudioElement.removeAttribute('src');
+        this.currentAudioElement.load();
+      }
+      this.currentAudioElement = undefined;
+      this.beatManager.dispose();
       
       // デバッグマネージャーをクリーンアップ
       if (this.debugManager) {
         this.debugManager.destroy();
       }
+
+      this.postEffectManager?.destroy();
       
       // PIXI アプリケーションを破棄
       if (this.app) {
@@ -1659,8 +1853,12 @@ export class Engine {
       // グローバル参照を削除
       try {
         if (typeof window !== 'undefined') {
-          delete (window as any).__PIXI_APP__;
-          delete (window as any).engineInstance;
+          if ((window as any).__PIXI_APP__ === this.app) {
+            delete (window as any).__PIXI_APP__;
+          }
+          if ((window as any).engineInstance === this) {
+            delete (window as any).engineInstance;
+          }
         }
       } catch {}
     } catch (error) {
@@ -2046,6 +2244,7 @@ export class Engine {
       templateAssignments: this.templateManager.exportAssignments(),
       // V2パラメータデータ
       parameterData: v2Export,
+      postEffectConfig: this.getPostEffectConfig(),
       lyrics: this.phrases
     };
   }
@@ -2053,11 +2252,34 @@ export class Engine {
   // 現在時刻を設定するメソッド（動画出力用）
   setCurrentTime(timeMs: number): void {
     this.currentTime = timeMs;
+    this.beatManager.sync(timeMs);
     // OptimizedParameterUpdaterの現在時刻も更新
     if (this.optimizedUpdater) {
       this.optimizedUpdater.setCurrentTime(timeMs);
     }
     this.instanceManager.update(timeMs);
+    this.postEffectManager.update(timeMs);
+  }
+
+  getPostEffectConfig(): GlobalPostEffectConfig {
+    return this.postEffectManager.getConfig();
+  }
+
+  updatePostEffectConfig(
+    config: Partial<GlobalPostEffectConfig>,
+    saveHistory = true
+  ): void {
+    this.postEffectManager.setConfig(config);
+    this.postEffectManager.update(this.currentTime);
+    this.app.render();
+
+    window.dispatchEvent(new CustomEvent('post-effect-config-changed', {
+      detail: { config: this.getPostEffectConfig() }
+    }));
+
+    if (saveHistory) {
+      this.saveUndoState('共通Post FX変更');
+    }
   }
 
   // ProjectStateManagerへのアクセサ
@@ -2192,6 +2414,25 @@ export class Engine {
   getCurrentTime(): number {
     return this.currentTime;
   }
+
+  getCurrentAudioElement(): HTMLAudioElement | undefined {
+    return this.currentAudioElement;
+  }
+
+  setBeatMarkers(beats: BeatMarker[]): void {
+    this.beatManager.setBeats(beats);
+    window.dispatchEvent(new CustomEvent('beat-markers-updated', {
+      detail: { beats: this.getBeatMarkers() }
+    }));
+  }
+
+  getBeatMarkers(): BeatMarker[] {
+    return [...this.beatManager.getBeats()];
+  }
+
+  onBeat(listener: (detail: BeatEventDetail) => void): () => void {
+    return this.beatManager.subscribe(listener);
+  }
   
   // 音楽オフセット値を取得するメソッド
   getAudioOffset(): number {
@@ -2217,16 +2458,6 @@ export class Engine {
         return false;
       }
       
-      // 現在の状態を更新してからUndoを実行
-      this.projectStateManager.updateCurrentState({
-        lyricsData: JSON.parse(JSON.stringify(this.phrases)),
-        currentTime: this.currentTime,
-        templateAssignments: this.templateManager.exportAssignments(),
-        globalParams: this.parameterManager.getGlobalDefaults(),
-        objectParams: this.parameterManager.exportCompressed().phrases || {},
-        defaultTemplateId: this.templateManager.getDefaultTemplateId()
-      });
-      
       // Undoを実行
       const success = this.projectStateManager.undo();
       
@@ -2234,6 +2465,7 @@ export class Engine {
         // 状態を復元
         const restoredState = this.projectStateManager.getCurrentState();
         this.restoreProjectState(restoredState);
+        this.dispatchUndoRedoStateChanged();
       }
       
       return success;
@@ -2261,6 +2493,7 @@ export class Engine {
         // 状態を復元
         const restoredState = this.projectStateManager.getCurrentState();
         this.restoreProjectState(restoredState);
+        this.dispatchUndoRedoStateChanged();
       }
       
       return success;
@@ -2285,6 +2518,34 @@ export class Engine {
   canRedo(): boolean {
     return this.projectStateManager.canRedo();
   }
+
+  /** 現在の編集状態をUndo/Redo履歴へ確定する。 */
+  saveUndoState(label: string): void {
+    const parameterData = this.parameterManager.exportCompressed();
+    this.projectStateManager.updateCurrentState({
+      lyricsData: JSON.parse(JSON.stringify(this.phrases)),
+      currentTime: this.currentTime,
+      templateAssignments: this.templateManager.exportAssignments(),
+      globalParams: this.parameterManager.getGlobalDefaults(),
+      objectParams: parameterData.phrases as Record<string, Record<string, any>>,
+      individualSettingsEnabled: this.parameterManager.getIndividualSettingsEnabled(),
+      parameterData,
+      defaultTemplateId: this.templateManager.getDefaultTemplateId(),
+      backgroundConfig: this.backgroundConfig,
+      stageConfig: this.stageConfig,
+      postEffectConfig: this.getPostEffectConfig(),
+      audioFileName: this.audioFileName,
+      audioFileDuration: this.audioDuration
+    });
+    this.projectStateManager.saveCurrentState(label);
+    this.dispatchUndoRedoStateChanged();
+  }
+
+  private dispatchUndoRedoStateChanged(): void {
+    window.dispatchEvent(new CustomEvent('undo-redo-state-changed', {
+      detail: { canUndo: this.canUndo(), canRedo: this.canRedo() }
+    }));
+  }
   
   /**
    * プロジェクト状態を復元する
@@ -2292,22 +2553,18 @@ export class Engine {
    */
   private restoreProjectState(state: import('./ProjectStateManager').ProjectState): void {
     try {
-      
-      // 歌詞データの復元
-      if (state.lyricsData) {
-        this.phrases = JSON.parse(JSON.stringify(state.lyricsData));
-        this.charPositions.clear();
-        this.arrangeCharsOnStage();
-        this.instanceManager.loadPhrases(this.phrases, this.charPositions);
-      }
-      
+      // Undo後に古い非同期パラメータ更新が再適用されるのを防ぐ。
+      this.optimizedUpdater.cancelPendingUpdates();
+
       // テンプレート割り当ての復元
       if (state.templateAssignments) {
         this.templateManager.importAssignments(state.templateAssignments);
       }
       
       // パラメータの完全復元（改善版）
-      if (state.globalParams || state.objectParams) {
+      if (state.parameterData) {
+        this.parameterManager.importCompressed(state.parameterData as any);
+      } else if (state.globalParams || state.objectParams) {
         // ParameterManagerの完全復元メソッドを使用
         this.parameterManager.restoreCompleteState({
           global: state.globalParams,
@@ -2320,6 +2577,18 @@ export class Engine {
           this.parameterManager.updateGlobalDefaults(state.globalParams);
         }
         
+      }
+
+      if (state.postEffectConfig) {
+        this.updatePostEffectConfig(state.postEffectConfig, false);
+      }
+
+      // 復元したパラメータを使って文字配置を再計算する。
+      if (state.lyricsData) {
+        this.phrases = JSON.parse(JSON.stringify(state.lyricsData));
+        this.charPositions.clear();
+        this.arrangeCharsOnStage();
+        this.instanceManager.loadPhrases(this.phrases, this.charPositions);
       }
       
       // デフォルトテンプレートの復元
@@ -2348,6 +2617,7 @@ export class Engine {
       
       // タイムライン更新イベントを発火
       this.dispatchTimelineUpdatedEvent();
+      window.dispatchEvent(new CustomEvent('project-state-restored'));
       
     } catch (error) {
       console.error('Engine: プロジェクト状態復元エラー:', error);
@@ -2389,7 +2659,8 @@ export class Engine {
           globalParams: this.parameterManager.getGlobalDefaults(),
           objectParams: paramExport.objects || {},
           individualSettingsEnabled: paramExport.individualSettingsEnabled || [],
-          defaultTemplateId: this.templateManager.getDefaultTemplateId()
+          defaultTemplateId: this.templateManager.getDefaultTemplateId(),
+          postEffectConfig: this.getPostEffectConfig()
         });
         this.projectStateManager.saveCurrentState('プロジェクト読み込み完了');
         
@@ -2478,7 +2749,8 @@ export class Engine {
   /**
    * 背景画像を設定
    */
-  setBackgroundImage(imageFilePath: string, fitMode: BackgroundFitMode = 'cover'): void {
+  async setBackgroundImage(imageFilePath: string, fitMode: BackgroundFitMode = 'cover'): Promise<void> {
+    const loadId = ++this.backgroundImageLoadId;
     this.clearBackgroundMedia();
     
     this.backgroundConfig = {
@@ -2488,15 +2760,28 @@ export class Engine {
       backgroundColor: this.backgroundConfig.backgroundColor
     };
     
-    PIXI.Texture.from(imageFilePath).then((texture) => {
+    try {
+      const source = imageFilePath.match(/^[A-Za-z]:[\\/]/)
+        ? `file:///${encodeURI(imageFilePath.replace(/\\/g, '/'))}`
+        : imageFilePath;
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = () => reject(new Error(`画像をデコードできません: ${source}`));
+        element.src = source;
+      });
+      if (loadId !== this.backgroundImageLoadId) return;
+      const texture = PIXI.Texture.from(image);
       this.backgroundSprite = new PIXI.Sprite(texture);
       this.applyBackgroundFitMode(this.backgroundSprite, fitMode);
       this.backgroundLayer.addChild(this.backgroundSprite);
-    }).catch((error) => {
+      this.backgroundLayer.alpha = this.backgroundConfig.opacity ?? 1;
+    } catch (error) {
       console.error(`Engine: Failed to load background image: ${imageFilePath}`, error);
       // フォールバック: 背景色に戻す
-      this.clearBackgroundMedia();
-    });
+      if (loadId === this.backgroundImageLoadId) this.clearBackgroundMedia();
+      throw error;
+    }
   }
   
   /**
@@ -2572,7 +2857,7 @@ export class Engine {
     
     this.backgroundConfig = {
       type: 'video',
-      videoFilePath: fileName || 'loaded',
+      videoFilePath: video.currentSrc || video.src || fileName || 'loaded',
       fitMode,
       backgroundColor: this.backgroundConfig.backgroundColor,
       videoLoop: loop
@@ -2612,8 +2897,8 @@ export class Engine {
     // 背景スプライトを削除
     if (this.backgroundSprite) {
       this.backgroundLayer.removeChild(this.backgroundSprite);
-      // テクスチャ/ベーステクスチャも含めて確実に破棄
-      this.backgroundSprite.destroy({ children: true, texture: true, baseTexture: true });
+      // 同じ画像を再読込できるよう、Textureを残してSpriteのみ破棄する。
+      this.backgroundSprite.destroy({ children: true });
       this.backgroundSprite = undefined;
     }
     
@@ -2642,6 +2927,23 @@ export class Engine {
     delete this.backgroundConfig.imageFilePath;
     delete this.backgroundConfig.videoFilePath;
     this.backgroundVideoFileName = null;
+    this.applyBackgroundTransparency();
+  }
+
+  /** 透過背景かどうかをレンダラーの背景alphaとプレビューの市松模様へ反映する。 */
+  private applyBackgroundTransparency(): void {
+    const transparent = this.backgroundConfig.type === 'transparent';
+    if (this.app?.renderer) {
+      this.app.renderer.background.alpha = transparent ? 0 : 1;
+    }
+    this.canvasContainer?.classList.toggle('transparent-background', transparent);
+    window.dispatchEvent(new CustomEvent('utavista:background-transparency-changed', {
+      detail: { transparent }
+    }));
+  }
+
+  isBackgroundTransparent(): boolean {
+    return this.backgroundConfig.type === 'transparent';
   }
   
   /**
@@ -2699,6 +3001,14 @@ export class Engine {
     
     // 背景タイプが変更された場合、既存の背景メディアをクリア
     if (config.type && config.type !== previousType) {
+      if (config.type === 'transparent') {
+        // 背景メディアを外し、レンダラーの背景を透明にする。
+        this.clearBackgroundMedia();
+        this.backgroundConfig.type = 'transparent';
+        this.applyBackgroundTransparency();
+      } else if (previousType === 'transparent') {
+        this.applyBackgroundTransparency();
+      }
       if (config.type === 'color') {
         // 単色に変更された場合、動画や画像をクリア
         this.clearBackgroundMedia();
@@ -2767,6 +3077,7 @@ export class Engine {
     // PIXIアプリケーションをリサイズ
     if (this.app && this.app.renderer) {
       this.app.renderer.resize(width, height);
+      this.postEffectManager.resize(this.app.screen);
       
       // CSSスケーリングを再適用
       this.applyCSSScaling();
@@ -2952,6 +3263,7 @@ export class Engine {
         
         // 一時的にレンダラーのサイズを変更
         this.app.renderer.resize(outputWidth, outputHeight);
+        this.postEffectManager.resize(this.app.screen);
         
         // メインステージをレンダーテクスチャに描画
         this.app.renderer.render(this.app.stage, { renderTexture });
@@ -2972,6 +3284,7 @@ export class Engine {
         
         // レンダラーのサイズを元に戻す
         this.app.renderer.resize(currentWidth, currentHeight);
+        this.postEffectManager.resize(this.app.screen);
         
       } else {
         // 現在のサイズのままキャプチャ
@@ -3578,7 +3891,8 @@ export class Engine {
           stageConfig: this.stageConfig,
           selectedTemplate: this.templateManager.getDefaultTemplateId(),
           templateParams: this.parameterManager.exportCompressed(),
-          backgroundConfig: this.backgroundConfig
+          backgroundConfig: this.backgroundConfig,
+          postEffectConfig: this.getPostEffectConfig()
         },
         // 既存のrecentFilesデータを保持
         recentFiles: existingData?.recentFiles || { audioFiles: [], backgroundVideoFiles: [] }
@@ -4024,6 +4338,24 @@ export class Engine {
     // V2モード: 直接更新
     this.parameterManager.updateParameters(phraseId, params);
   }
+
+  /** シーン設定プリセットをフレーズ・単語・文字の任意オブジェクトへ割り当てる。 */
+  public updateObjectParameters(
+    objectId: string,
+    params: Partial<StandardParameters>,
+    saveHistory: boolean = true
+  ): void {
+    this.parameterManager.enableIndividualSetting(objectId);
+    this.parameterManager.updateParameters(objectId, params);
+    this.instanceManager.updateExistingInstances([objectId]);
+    this.instanceManager.update(this.currentTime);
+    if (saveHistory) this.saveUndoState('オブジェクトのシーン設定変更');
+  }
+
+  public updateMultipleObjectParameters(objectIds: string[], params: Partial<StandardParameters>): void {
+    objectIds.forEach(objectId => this.updateObjectParameters(objectId, params, false));
+    this.saveUndoState('複数オブジェクトのシーン設定変更');
+  }
   
   /**
    * グローバルパラメータ更新（V2専用）
@@ -4089,6 +4421,7 @@ export class Engine {
         globalParams: { ...currentState.globalParams, ...params }
       });
     }
+    this.saveUndoState('基本シーン設定変更');
   }
   
   /**

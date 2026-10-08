@@ -103,8 +103,7 @@ const BeatMarkers: React.FC<BeatMarkersProps> = ({
     >
       {visibleBeats.map((beat, index) => {
         // タイムライン上の位置を計算
-        const relativeTime = beat.timestamp - viewStart;
-        const position = relativeTime / msPerPixel;
+        const position = beat.timestamp / msPerPixel;
         
         // 信頼度が70%以上を高信頼度とみなす
         const isHighConfidence = beat.confidence >= 0.7;

@@ -74,7 +74,7 @@
   width: 400px;
   flex-shrink: 0;
   background-color: #2c2c2c;
-  overflow-y: auto;
+  overflow-y: hidden;
   overflow-x: hidden;
 }
 

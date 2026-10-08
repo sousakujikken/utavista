@@ -10,9 +10,17 @@ import type {
 
 export interface ElectronAPI {
   // File management
-  saveProject(projectData: ProjectData): Promise<string>;
+  saveProject(projectData: ProjectData, options?: { saveAs?: boolean }): Promise<string>;
   loadProject(): Promise<ProjectData>;
-  selectMedia(type: 'video' | 'audio'): Promise<MediaFileInfo>;
+  consumePendingProject(): Promise<ProjectData | null>;
+  onProjectOpenRequested(callback: () => void): () => void;
+  /** 終了前の確認用。handler は未保存の変更があれば true を返す。 */
+  onUnsavedChangesQuery(handler: () => boolean | Promise<boolean>): () => void;
+  /** 「保存して終了」用。handler は保存できたら true、キャンセル・失敗なら false を返す。 */
+  onSaveBeforeClose(handler: () => Promise<boolean>): () => void;
+  selectMedia(type: 'video' | 'audio' | 'image'): Promise<MediaFileInfo>;
+  exportSrt(content: string, defaultFileName?: string): Promise<string | null>;
+  exportPng(imageData: Uint8Array, defaultFileName?: string): Promise<string | null>;
   
   // Video export (legacy)
   startExport(options: ExportOptions): Promise<void>;
@@ -20,6 +28,22 @@ export interface ElectronAPI {
   
   // Video export save dialog
   showSaveDialogForVideo(defaultFileName: string): Promise<string | null>;
+  showSaveDialogForAlphaVideo(defaultFileName: string): Promise<string | null>;
+
+  // 透過背景の書き出し（ProRes 4444）。dataは幅×高さ×4のRGBA（非プリマルチプライ）
+  alphaExportStart(options: {
+    sessionId: string;
+    width: number;
+    height: number;
+    fps: number;
+    totalFrames: number;
+    outputPath: string;
+    audioPath?: string;
+    audioStartMs?: number;
+  }): Promise<void>;
+  alphaExportFrame(payload: { sessionId: string; data: Uint8Array }): Promise<void>;
+  alphaExportFinalize(options: { sessionId: string }): Promise<string>;
+  alphaExportCancel(options: { sessionId: string }): Promise<void>;
   
   // Video metadata
   getVideoMetadata(videoPath: string): Promise<{
@@ -74,6 +98,7 @@ export interface ElectronAPI {
     width: number;
     height: number;
     audioPath?: string;
+    audioStartMs?: number; // 書き出し範囲の開始時刻（音声の切り出し位置）
     outputPath?: string; // optional full path; otherwise default behavior
     totalFrames?: number;
     totalDurationMs?: number;

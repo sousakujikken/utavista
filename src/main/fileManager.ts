@@ -5,27 +5,44 @@ import * as path from 'path';
 import type { ProjectData, MediaFileInfo } from '../shared/types';
 
 export class FileManager {
-  async saveProject(projectData: ProjectData): Promise<string> {
-    const { filePath } = await dialog.showSaveDialog({
-      title: 'Save UTAVISTA Project',
-      defaultPath: `${projectData.name || 'project'}.uta`,
-      filters: [
-        { name: 'UTAVISTA Project', extensions: ['uta'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
-    });
+  private currentProjectPath: string | null = null;
+  private currentProjectCreatedAt: string | null = null;
+
+  async saveProject(projectData: ProjectData, options: { saveAs?: boolean } = {}): Promise<string> {
+    if (!projectData.postEffectConfig) {
+      throw new Error('共通Post FX設定がプロジェクトデータに含まれていません');
+    }
+
+    let filePath = !options.saveAs ? this.currentProjectPath : null;
+    if (!filePath) {
+      const result = await dialog.showSaveDialog({
+        title: options.saveAs ? 'Save UTAVISTA Project As' : 'Save UTAVISTA Project',
+        defaultPath: `${projectData.name || 'project'}.uta`,
+        filters: [
+          { name: 'UTAVISTA Project', extensions: ['uta'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+      filePath = result.filePath || null;
+    }
     
     if (filePath) {
       // Update metadata before saving
+      const createdAt = this.currentProjectCreatedAt || projectData.metadata?.createdAt || new Date().toISOString();
       const updatedProjectData = {
         ...projectData,
+        name: path.basename(filePath, path.extname(filePath)),
         metadata: {
           ...projectData.metadata,
+          projectName: path.basename(filePath, path.extname(filePath)),
+          createdAt,
           modifiedAt: new Date().toISOString()
         }
       };
       
       await fs.writeFile(filePath, JSON.stringify(updatedProjectData, null, 2), 'utf-8');
+      this.currentProjectPath = filePath;
+      this.currentProjectCreatedAt = createdAt;
       return filePath;
     }
     
@@ -42,51 +59,92 @@ export class FileManager {
       properties: ['openFile']
     });
     
-    if (filePaths.length > 0) {
-      const content = await fs.readFile(filePaths[0], 'utf-8');
-      
-      try {
-        const projectFileData = JSON.parse(content);
-        
-        // ProjectFileData形式の基本的な検証（緩い検証）
-        if (!projectFileData.metadata && !projectFileData.version) {
-          console.warn('Project file missing metadata, applying defaults');
-          projectFileData.metadata = {
-            projectName: path.basename(filePaths[0], path.extname(filePaths[0])),
-            createdAt: new Date().toISOString(),
-            modifiedAt: new Date().toISOString()
-          };
-        }
-        
-        if (!projectFileData.version) {
-          console.warn('Project file missing version, applying default');
-          projectFileData.version = '0.1.0';
-        }
-        
-        // ProjectData形式に変換（互換性のため）
-        const projectData: ProjectData = {
-          id: `project_${Date.now()}`,
-          name: projectFileData.metadata?.projectName || path.basename(filePaths[0], path.extname(filePaths[0])),
-          ...projectFileData
-        };
-        
-        return projectData;
-        
-      } catch (parseError) {
-        console.error('Failed to parse project file:', parseError);
-        const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown error';
-        throw new Error(`Invalid project file format: ${errorMessage}`);
-      }
-    }
-    
+    if (filePaths.length > 0) return this.loadProjectFromPath(filePaths[0]);
+
     throw new Error('Load cancelled by user');
   }
+
+  async loadProjectFromPath(filePath: string): Promise<ProjectData> {
+    if (path.extname(filePath).toLowerCase() !== '.uta') {
+      throw new Error('UTAVISTAプロジェクト（.uta）ではありません');
+    }
+
+    const content = await fs.readFile(filePath, 'utf-8');
+
+    try {
+      const projectFileData = JSON.parse(content);
+
+      // ProjectFileData形式の基本的な検証（緩い検証）
+      if (!projectFileData.metadata && !projectFileData.version) {
+        console.warn('Project file missing metadata, applying defaults');
+        projectFileData.metadata = {
+          projectName: path.basename(filePath, path.extname(filePath)),
+          createdAt: new Date().toISOString(),
+          modifiedAt: new Date().toISOString()
+        };
+      }
+
+      if (!projectFileData.version) {
+        console.warn('Project file missing version, applying default');
+        projectFileData.version = '0.1.0';
+      }
+
+      const projectData: ProjectData = {
+        id: `project_${Date.now()}`,
+        name: projectFileData.metadata?.projectName || path.basename(filePath, path.extname(filePath)),
+        ...projectFileData
+      };
+      this.currentProjectPath = filePath;
+      this.currentProjectCreatedAt = projectData.metadata?.createdAt || null;
+      return projectData;
+    } catch (parseError) {
+      console.error('Failed to parse project file:', parseError);
+      const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown error';
+      throw new Error(`Invalid project file format: ${errorMessage}`);
+    }
+  }
+
+  async exportSrt(content: string, defaultFileName: string = 'lyrics.srt'): Promise<string | null> {
+    const safeBaseName = path.basename(defaultFileName, path.extname(defaultFileName)) || 'lyrics';
+    const result = await dialog.showSaveDialog({
+      title: 'Export SubRip Subtitle',
+      defaultPath: `${safeBaseName}.srt`,
+      filters: [
+        { name: 'SubRip Subtitle', extensions: ['srt'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (result.canceled || !result.filePath) return null;
+
+    const utf8Content = content.startsWith('\uFEFF') ? content : `\uFEFF${content}`;
+    await fs.writeFile(result.filePath, utf8Content, 'utf-8');
+    return result.filePath;
+  }
+
+  async exportPng(imageData: Uint8Array, defaultFileName: string = 'screenshot.png'): Promise<string | null> {
+    const safeBaseName = path.basename(defaultFileName, path.extname(defaultFileName)) || 'screenshot';
+    const result = await dialog.showSaveDialog({
+      title: 'Export Current Frame as PNG',
+      defaultPath: `${safeBaseName}.png`,
+      filters: [
+        { name: 'PNG Image', extensions: ['png'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (result.canceled || !result.filePath) return null;
+
+    await fs.writeFile(result.filePath, imageData);
+    return result.filePath;
+  }
   
-  async selectMediaFile(type: 'video' | 'audio'): Promise<MediaFileInfo> {
+  async selectMediaFile(type: 'video' | 'audio' | 'image'): Promise<MediaFileInfo> {
     const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv', '3gp'];
     const audioExtensions = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg', 'wma'];
+    const imageExtensions = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'];
     
-    const extensions = type === 'video' ? videoExtensions : audioExtensions;
+    const extensions = type === 'video' ? videoExtensions : type === 'audio' ? audioExtensions : imageExtensions;
     const typeName = type.charAt(0).toUpperCase() + type.slice(1);
     
     const { filePaths } = await dialog.showOpenDialog({
@@ -213,11 +271,9 @@ export class FileManager {
 }
 
 export function setupFileHandlers() {
-  const fileManager = new FileManager();
-  
-  ipcMain.handle('file:save-project', async (event, projectData: ProjectData) => {
+  ipcMain.handle('file:save-project', async (event, projectData: ProjectData, options?: { saveAs?: boolean }) => {
     try {
-      return await fileManager.saveProject(projectData);
+      return await fileManager.saveProject(projectData, options);
     } catch (error) {
       console.error('Failed to save project:', error);
       throw error;
@@ -233,11 +289,29 @@ export function setupFileHandlers() {
     }
   });
   
-  ipcMain.handle('file:select-media', async (event, type: 'video' | 'audio') => {
+  ipcMain.handle('file:select-media', async (event, type: 'video' | 'audio' | 'image') => {
     try {
       return await fileManager.selectMediaFile(type);
     } catch (error) {
       console.error(`Failed to select ${type} file:`, error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('file:export-srt', async (_event, content: string, defaultFileName?: string) => {
+    try {
+      return await fileManager.exportSrt(content, defaultFileName);
+    } catch (error) {
+      console.error('Failed to export SRT:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('file:export-png', async (_event, imageData: Uint8Array, defaultFileName?: string) => {
+    try {
+      return await fileManager.exportPng(imageData, defaultFileName);
+    } catch (error) {
+      console.error('Failed to export PNG:', error);
       throw error;
     }
   });
@@ -298,3 +372,5 @@ export function setupFileHandlers() {
     }
   });
 }
+
+export const fileManager = new FileManager();

@@ -2,6 +2,7 @@ import { StandardParameters, DEFAULT_PARAMETERS } from '../../types/StandardPara
 import { ParameterValidator } from '../../utils/ParameterValidator';
 import { templateRegistry } from '../templates/registry/templateRegistry';
 import { ParameterProcessor } from '../utils/ParameterProcessor';
+import { normalizeMotionName } from '../motion/Scene';
 
 // 完全なパラメータセット（すべて必須）
 export type CompleteParameters = Required<StandardParameters>;
@@ -42,7 +43,7 @@ export class ParameterManagerV2 {
   private phraseIndividualSettings: Map<string, boolean> = new Map();
   
   // デフォルトテンプレートID
-  private defaultTemplateId: string = 'fadeslidetext';
+  private defaultTemplateId: string = 'kineticscenetemplate';
   
   // 変更通知用のコールバック
   private changeListeners: Map<string, (phraseId: string, params: CompleteParameters) => void> = new Map();
@@ -69,7 +70,17 @@ export class ParameterManagerV2 {
    */
   private createDefaultParameters(): CompleteParameters {
     // すべてのオプショナルパラメータも含めて完全な型として返す
-    return { ...DEFAULT_PARAMETERS } as CompleteParameters;
+    return this.removeDeprecatedParameters({ ...DEFAULT_PARAMETERS }) as CompleteParameters;
+  }
+
+  /** 旧プロジェクトに残る、固定コンポーザーでは使わないパラメータを破棄し、統合済みのモーション名を読み替える。 */
+  private removeDeprecatedParameters<T extends Record<string, any>>(params: T): T {
+    const sanitized: Record<string, any> = { ...params };
+    delete sanitized.tailTime;
+    ['entranceMotion', 'sustainMotion', 'exitMotion'].forEach(name => {
+      if (typeof sanitized[name] === 'string') sanitized[name] = normalizeMotionName(sanitized[name]);
+    });
+    return sanitized as T;
   }
   
   /**
@@ -202,10 +213,15 @@ export class ParameterManagerV2 {
     paramName: keyof StandardParameters,
     value: unknown
   ): void {
+    if (paramName === 'tailTime') return;
+
     const phraseId = this.extractPhraseId(objectId);
-    const params = this.phraseParameters.get(phraseId);
+    let params = this.phraseParameters.get(phraseId);
     if (!params) {
-      throw new Error(`Phrase ${phraseId} not initialized for object ${objectId}`);
+      params = this.getParameters(objectId) as CompleteParameters;
+      delete (params as CompleteParameters & { templateId?: string }).templateId;
+      this.phraseParameters.set(phraseId, params);
+      this.phraseTemplates.set(phraseId, this.defaultTemplateId);
     }
     
     // パラメータを更新
@@ -228,10 +244,11 @@ export class ParameterManagerV2 {
     const phraseId = this.extractPhraseId(objectId);
     let params = this.phraseParameters.get(phraseId);
     if (!params) {
-      // フレーズが未初期化の場合は自動初期化
-      const templateId = this.getDefaultTemplateId() || 'fadeslidetext';
-      this.initializePhrase(phraseId, templateId);
-      params = this.phraseParameters.get(phraseId)!;
+      // オブジェクト固有設定は、親オブジェクトまたはグローバル設定をスナップショット化して開始する。
+      params = this.getParameters(objectId) as CompleteParameters;
+      delete (params as CompleteParameters & { templateId?: string }).templateId;
+      this.phraseParameters.set(phraseId, params);
+      this.phraseTemplates.set(phraseId, this.defaultTemplateId);
     }
     
     // 配列が渡された場合の緊急対応
@@ -261,13 +278,22 @@ export class ParameterManagerV2 {
         templateIdForValidation = this.templateManager.getAssignment(phraseId) || '';
       } catch {}
     }
-    const validation = ParameterValidator.validate(updates, templateIdForValidation as any);
+    if (!templateIdForValidation) templateIdForValidation = this.defaultTemplateId;
+    const normalizedUpdates = this.removeDeprecatedParameters(
+      ParameterProcessor.validateParameterObject(updates as Record<string, any>)
+    );
+    const validation = ParameterValidator.validate(normalizedUpdates, templateIdForValidation as any);
     if (!validation.isValid) {
       console.warn('Parameter validation errors:', validation.errors);
     }
     
     // 更新を適用
-    Object.assign(params, validation.sanitized);
+    // KineticSceneTemplateの項目は動的なテンプレート定義が正であり、
+    // 旧ParameterRegistryに未登録でも選択オブジェクトへ適用できるようにする。
+    const applicableUpdates = Object.fromEntries(
+      Object.entries(normalizedUpdates).filter(([, value]) => value !== undefined)
+    );
+    Object.assign(params, applicableUpdates);
     
     if (import.meta.env.DEV && Math.random() < 0.01) { // 1%の確率でのみ出力
     }
@@ -296,13 +322,13 @@ export class ParameterManagerV2 {
     // フレーズIDかどうかを判定
     const phraseId = this.extractPhraseId(objectId);
     
-    const params = this.phraseParameters.get(phraseId);
+    const params = this.phraseParameters.get(phraseId) || this.getInheritedParameters(phraseId);
     if (!params) {
       // 未初期化の場合はデフォルトを返す
       console.warn(`ParameterManagerV2: Phrase ${phraseId} not initialized for object ${objectId}, returning defaults`);
       console.debug(`ParameterManagerV2: 抽出されたフレーズID: "${phraseId}", オリジナルオブジェクトID: "${objectId}"`);
       console.debug(`ParameterManagerV2: 現在初期化済みフレーズ:`, Array.from(this.phraseParameters.keys()));
-      return this.createDefaultParameters();
+      return { ...this.globalDefaults } as CompleteParameters & { templateId?: string };
     }
     
     // templateIdを追加して返す（個別設定の場合のみ）
@@ -317,39 +343,25 @@ export class ParameterManagerV2 {
   }
   
   /**
-   * オブジェクトIDからフレーズIDを抽出
+   * 旧API名を維持しつつ、現在は各オブジェクトIDをそのまま保存キーとして扱う。
    */
   extractPhraseId(objectId: string): string {
-    // 拡張形式の文字ID: phrase_X_word_Y_hZfW_char_N → phrase_X を抽出
-    const extendedCharPattern = /^(.+)_word_\d+_h\d+f\d+_char_\d+$/;
-    const extendedCharMatch = objectId.match(extendedCharPattern);
-    if (extendedCharMatch) {
-      return extendedCharMatch[1]; // フレーズIDを返す
-    }
-    
-    // 拡張形式の単語ID: phrase_X_word_Y_hZfW → phrase_X を抽出
-    const extendedWordPattern = /^(.+)_word_\d+_h\d+f\d+$/;
-    const extendedWordMatch = objectId.match(extendedWordPattern);
-    if (extendedWordMatch) {
-      return extendedWordMatch[1]; // フレーズIDを返す
-    }
-    
-    // 従来形式の文字ID: 任意の文字列_word_数字_char_数字 → フレーズIDを抽出
-    const charPattern = /^(.+)_word_\d+_char_\d+$/;
-    const charMatch = objectId.match(charPattern);
-    if (charMatch) {
-      return charMatch[1]; // フレーズIDを返す
-    }
-    
-    // 従来形式の単語ID: 任意の文字列_word_数字 → フレーズIDを抽出
-    const wordPattern = /^(.+)_word_\d+$/;
-    const wordMatch = objectId.match(wordPattern);
-    if (wordMatch) {
-      return wordMatch[1]; // フレーズIDを返す
-    }
-    
-    // フレーズIDまたは不明な形式の場合はそのまま返す
     return objectId;
+  }
+
+  private getInheritedParameters(objectId: string): CompleteParameters | undefined {
+    const parentId = this.getParentObjectId(objectId);
+    if (!parentId) return undefined;
+    const directParent = this.phraseParameters.get(parentId);
+    if (directParent) return directParent;
+    return this.getInheritedParameters(parentId);
+  }
+
+  private getParentObjectId(objectId: string): string | null {
+    const charMatch = objectId.match(/^(.+)_char_(?:\d+|.+)$/);
+    if (charMatch) return charMatch[1];
+    const wordMatch = objectId.match(/^(.+)_word_(?:\d+|.+)$/);
+    return wordMatch ? wordMatch[1] : null;
   }
   
   /**
@@ -380,7 +392,9 @@ export class ParameterManagerV2 {
     // });
     
     // 型安全な正規化（配列が来ることは設計上あり得ない）
-    const normalizedUpdates = ParameterProcessor.validateParameterObject(updates as Record<string, any>);
+    const normalizedUpdates = this.removeDeprecatedParameters(
+      ParameterProcessor.validateParameterObject(updates as Record<string, any>)
+    );
     
     const validation = ParameterValidator.validate(normalizedUpdates);
     if (!validation.isValid) {
@@ -492,7 +506,7 @@ export class ParameterManagerV2 {
     
     // 重要なレイアウトパラメータは常に保持
     const criticalParams: (keyof StandardParameters)[] = [
-      'letterSpacing', 'fontSize', 'fontFamily', 'lineHeight', 
+      'letterSpacing', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight',
       'offsetX', 'offsetY', 'textColor'
     ];
     
@@ -550,9 +564,9 @@ export class ParameterManagerV2 {
       // 重要: 個別設定フレーズは完全なスナップショットを保存してグローバル変更の影響を遮断
       let diff: Partial<StandardParameters>;
       if (isIndividual) {
-        diff = JSON.parse(JSON.stringify(params));
+        diff = this.removeDeprecatedParameters(JSON.parse(JSON.stringify(params)));
       } else {
-        diff = this.calculateDiff(this.globalDefaults, params);
+        diff = this.removeDeprecatedParameters(this.calculateDiff(this.globalDefaults, params));
       }
       
       // 開発時のみログ出力（高頻度なので通常は抑制）
@@ -568,7 +582,7 @@ export class ParameterManagerV2 {
     
     return {
       version: "2.0",
-      globalDefaults: this.globalDefaults,
+      globalDefaults: this.removeDeprecatedParameters(this.globalDefaults),
       phrases: compressed
     };
   }
@@ -579,7 +593,9 @@ export class ParameterManagerV2 {
   importCompressed(data: CompressedProjectData): void {
     
     // グローバルデフォルトを安全に設定
-    const normalizedGlobalDefaults = ParameterProcessor.normalizeToParameterObject(data.globalDefaults);
+    const normalizedGlobalDefaults = this.removeDeprecatedParameters(
+      ParameterProcessor.normalizeToParameterObject(data.globalDefaults)
+    );
     this.globalDefaults = ParameterProcessor.mergeParameterObjects(
       this.createDefaultParameters(), 
       normalizedGlobalDefaults
@@ -607,22 +623,26 @@ export class ParameterManagerV2 {
       // ベースパラメータを作成
       let params: CompleteParameters;
       
-      if (isIndividualEnabled && compressedPhrase.parameterDiff) {
+      const parameterDiff = compressedPhrase.parameterDiff
+        ? this.removeDeprecatedParameters(compressedPhrase.parameterDiff)
+        : undefined;
+
+      if (isIndividualEnabled && parameterDiff) {
         // 個別設定が有効な場合：保存時のスナップショット優先
         // 後方互換のため、差分形式（旧データ）もサポート
-        const diffKeys = Object.keys(compressedPhrase.parameterDiff);
+        const diffKeys = Object.keys(parameterDiff);
         const totalKeys = Object.keys(this.globalDefaults).length || 1;
         const looksLikeSnapshot = diffKeys.length > totalKeys / 2; // 大半のキーを含む場合はスナップショットと判断
 
         if (looksLikeSnapshot) {
           // スナップショットとしてそのまま使用（独立性を保証）
           params = { ...this.createDefaultParameters() };
-          Object.assign(params, compressedPhrase.parameterDiff);
+          Object.assign(params, parameterDiff);
         } else {
           // 旧形式の差分として扱い、当時のグローバル相当（現行globalDefaults）に上書き
           // これにより過去データも破綻せず読み込める
           params = { ...this.globalDefaults };
-          Object.assign(params, compressedPhrase.parameterDiff);
+          Object.assign(params, parameterDiff);
         }
       } else {
         // 個別設定が無効な場合：正しい優先順位で適用
@@ -639,8 +659,8 @@ export class ParameterManagerV2 {
         Object.assign(params, this.globalDefaults);
         
         // 4. 差分があれば適用（個別調整）
-        if (compressedPhrase.parameterDiff) {
-          Object.assign(params, compressedPhrase.parameterDiff);
+        if (parameterDiff) {
+          Object.assign(params, parameterDiff);
         }
         
       }
@@ -859,10 +879,11 @@ export class ParameterManagerV2 {
   enableIndividualSetting(objectId: string): void {
     const phraseId = this.extractPhraseId(objectId);
     
-    // フレーズが初期化されていない場合は自動初期化
+    // 未初期化オブジェクトは、親オブジェクトから継承した現在値を複製して開始する。
     if (!this.phraseParameters.has(phraseId)) {
-      const templateId = this.getDefaultTemplateId() || 'fadeslidetext';
-      this.initializePhrase(phraseId, templateId);
+      const inherited = this.getInheritedParameters(phraseId) || this.globalDefaults;
+      this.phraseParameters.set(phraseId, { ...inherited });
+      this.phraseTemplates.set(phraseId, this.getDefaultTemplateId() || 'kineticscenetemplate');
     }
     
     this.phraseIndividualSettings.set(phraseId, true);
@@ -915,21 +936,10 @@ export class ParameterManagerV2 {
       // 個別設定を無効化
       this.phraseIndividualSettings.set(phraseId, false);
       
-      // パラメータを正しい優先順位でリセット
-      if (this.phraseParameters.has(phraseId)) {
-        const templateId = this.phraseTemplates.get(phraseId) || this.defaultTemplateId;
-        const templateDefaults = this.getTemplateDefaults(templateId);
-        
-        // 正しい優先順位でリセット
-        const resetParams = { ...this.createDefaultParameters() }; // 1. システムデフォルト
-        Object.assign(resetParams, templateDefaults); // 2. テンプレート推奨値
-        Object.assign(resetParams, this.globalDefaults); // 3. ユーザーグローバル設定（最優先）
-        
-        this.phraseParameters.set(phraseId, resetParams);
-        
-        // パラメータ変更を通知
-        this.notifyParameterChange(phraseId, resetParams);
-      }
+      // 直接値を削除すると、次回取得時に親オブジェクト→グローバルの順で再び継承される。
+      this.phraseParameters.delete(phraseId);
+      this.phraseTemplates.delete(phraseId);
+      this.notifyParameterChange(phraseId, this.getParameters(phraseId));
       
       // 個別設定変更を通知
       this.notifyIndividualSettingChange(phraseId, false);

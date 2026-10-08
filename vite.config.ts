@@ -6,6 +6,8 @@ import path from 'path'
 export default defineConfig({
   plugins: [react()],
   root: './src/renderer',
+  // パッケージ版はfile://でindex.htmlを開くため、アセットを相対パスで参照する。
+  base: './',
   build: {
     target: 'es2020',
     outDir: '../../dist/renderer',

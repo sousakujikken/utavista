@@ -2,28 +2,32 @@
   background-color: var(--bg-level-3);
   border-radius: var(--radius-medium);
   padding: var(--space-md);
-  margin-bottom: var(--space-xl);
+  margin-bottom: var(--space-md);
   border: 1px solid var(--border-standard);
 }
 
 .common-section-title {
   margin: 0 0 var(--space-md) 0;
-  color: var(--text-tertiary);
+  color: var(--text-primary);
   font-family: var(--font-primary);
   font-size: var(--text-subtitle);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .common-section-subtitle {
   margin: 0 0 var(--space-sm) 0;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-family: var(--font-primary);
   font-size: var(--text-body);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .common-section-content {
   font-family: var(--font-primary);
   font-size: var(--text-body);
   color: var(--text-primary);
+}
+/* カード下端の余白をカードの内側余白だけにそろえる */
+.common-section-content > :last-child {
+  margin-bottom: 0;
 }

@@ -8,6 +8,8 @@ import { initializeLogging } from '../config/logging';
 import testLyricsData from './data/longTestLyrics.json';
 import { ParameterProcessor } from './utils/ParameterProcessor';
 import { ParameterRegistry } from './utils/ParameterRegistry';
+import { ProjectFileManager, PROJECT_LOAD_SETTLE_MS } from './services/ProjectFileManager';
+import { hasUnsavedChanges, markProjectClean } from './services/ProjectDirtyTracker';
 import './App.css';
 
 // Initialize logging configuration
@@ -49,11 +51,16 @@ interface TimingDebugInfo {
   }[];
 }
 
+interface ProjectSaveNotice {
+  type: 'saving' | 'success' | 'error';
+  message: string;
+}
+
 function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(60000); // デフォルト60秒（エンジンから実際の値を取得する）
-  const [selectedTemplate, setSelectedTemplate] = useState('glitchtextprimitive'); // テンプレート選択状態
+  const [selectedTemplate, setSelectedTemplate] = useState('kineticscenetemplate'); // 内部描画方式は固定
   const [engineReady, setEngineReady] = useState(false); // エンジン初期化状態を追加
   const [fontServiceReady, setFontServiceReady] = useState(false); // FontService初期化状態を追加
   const [currentTemplate, setCurrentTemplate] = useState<IAnimationTemplate | null>(null); // 現在のテンプレートを状態として保持
@@ -63,9 +70,14 @@ function App() {
   const [timingDebugInfo, setTimingDebugInfo] = useState<TimingDebugInfo>({});// タイミングデバッグ情報
 
   const engineRef = useRef<Engine | null>(null);
+  const engineInitializingRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
+  const saveInProgressRef = useRef(false);
+  const externalProjectLoadInProgressRef = useRef(false);
+  const saveNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [projectSaveNotice, setProjectSaveNotice] = useState<ProjectSaveNotice | null>(null);
   
   // Electron APIの状態を確認
   useEffect(() => {
@@ -142,12 +154,48 @@ function App() {
       // クロージャ問題を回避するため、isPlayingをチェックせずに常に停止状態に設定
       setIsPlaying(false);
     };
+
+    const handleAudioPlaybackError = () => {
+      // 音声デバイス側の開始失敗だけで映像プレビューまで停止扱いにしない。
+      setIsPlaying(Boolean(engineRef.current?.isRunning));
+    };
     
     // キーボードショートカットのハンドラ
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Ctrl+Z: Undo
-      if (event.ctrlKey && event.key === 'z' && !event.shiftKey) {
+      // Ctrl/Cmd+S: どの編集UIにフォーカスがあってもプロジェクトを保存する。
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat || saveInProgressRef.current) return;
+        const engine = engineRef.current;
+        if (engine) {
+          const saveAs = event.shiftKey;
+          saveInProgressRef.current = true;
+          if (saveNoticeTimerRef.current) clearTimeout(saveNoticeTimerRef.current);
+          setProjectSaveNotice({ type: 'saving', message: saveAs ? '別名で保存中…' : '保存中…' });
+          void new ProjectFileManager(engine).saveProject('project', saveAs)
+            .then(filePath => {
+              setProjectSaveNotice({ type: 'success', message: 'プロジェクトを保存しました' });
+              window.dispatchEvent(new CustomEvent('project-save-completed', { detail: { filePath } }));
+            })
+            .catch(error => {
+              setProjectSaveNotice({ type: 'error', message: 'プロジェクトの保存に失敗しました' });
+              window.dispatchEvent(new CustomEvent('project-save-failed', { detail: { error } }));
+            })
+            .finally(() => {
+              saveInProgressRef.current = false;
+              saveNoticeTimerRef.current = setTimeout(() => setProjectSaveNotice(null), 3000);
+            });
+        } else {
+          setProjectSaveNotice({ type: 'error', message: 'エンジンの準備完了後に保存してください' });
+          if (saveNoticeTimerRef.current) clearTimeout(saveNoticeTimerRef.current);
+          saveNoticeTimerRef.current = setTimeout(() => setProjectSaveNotice(null), 3000);
+        }
+      }
+      // Ctrl+Z: Undo
+      else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
         if (engineRef.current) {
           const success = engineRef.current.undo();
           if (success) {
@@ -156,14 +204,46 @@ function App() {
         }
       }
       // Ctrl+Shift+Z または Ctrl+Y: Redo
-      else if ((event.ctrlKey && event.shiftKey && event.key === 'Z') || 
-               (event.ctrlKey && event.key === 'y')) {
+      else if (((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'z') ||
+               ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y')) {
         event.preventDefault();
+        event.stopPropagation();
         if (engineRef.current) {
           const success = engineRef.current.redo();
           if (success) {
           } else {
           }
+        }
+      }
+      // Space: 入力操作中でなければタイムラインの再生・一時停止を切り替える。
+      else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.code === 'Space') {
+        const target = event.target as HTMLElement | null;
+        const isInteractiveTarget = Boolean(target?.closest(
+          'input, textarea, select, button, a, [contenteditable="true"], [role="textbox"]'
+        ));
+        if (isInteractiveTarget) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+
+        const engine = engineRef.current;
+        if (!engine) return;
+
+        if (engine.isRunning) {
+          engine.pause();
+          setIsPlaying(false);
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+          }
+        } else {
+          engine.play();
+          setIsPlaying(true);
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+          }
+          animationFrameRef.current = requestAnimationFrame(updateFrame);
         }
       }
       // 開発用ショートカット (Ctrl+Shift+T でパラメータテスト実行)
@@ -224,7 +304,8 @@ function App() {
     window.addEventListener('engine-seeked', handleEngineSeek as EventListener);
     window.addEventListener('timeline-ended', handleTimelineEnded as EventListener);
     window.addEventListener('audio-ended', handleAudioEnded as EventListener);
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('audio-playback-error', handleAudioPlaybackError as EventListener);
+    document.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('templateRegistryChanged', handleTemplateRegistryChanged as EventListener);
 
     // クリーンアップ
@@ -237,8 +318,10 @@ function App() {
       window.removeEventListener('engine-seeked', handleEngineSeek as EventListener);
       window.removeEventListener('timeline-ended', handleTimelineEnded as EventListener);
       window.removeEventListener('audio-ended', handleAudioEnded as EventListener);
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('audio-playback-error', handleAudioPlaybackError as EventListener);
+      document.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('templateRegistryChanged', handleTemplateRegistryChanged as EventListener);
+      if (saveNoticeTimerRef.current) clearTimeout(saveNoticeTimerRef.current);
     };
   }, []); // 一度だけ登録し、イベントハンドラ内で最新のstateを参照する方式に変更
 
@@ -286,29 +369,104 @@ function App() {
       return;
     }
     
-    // 初回のみエンジンを初期化
-    if (!engineRef.current) {
-      setEngineReady(false);
-      
-      // canvasContainer要素が存在することを確認してからエンジンを初期化
-      // setTimeout で DOM 更新後に実行することを保証
-      setTimeout(() => {
-        try {
-          const canvasElement = document.getElementById('canvasContainer');
-          if (canvasElement) {
-            initEngine();
-          } else {
-            console.error("canvasContainer要素が見つかりません。エンジン初期化をスキップします。");
-            // エラー状態を通知
-            setEngineReady(false);
-          }
-        } catch (error) {
-          console.error("エンジン初期化エラー:", error);
+    if (engineRef.current || engineInitializingRef.current) return;
+
+    setEngineReady(false);
+    let cancelled = false;
+
+    // DOM反映後に初期化する。StrictModeの再評価時は予約を必ず取り消す。
+    const initializationTimer = window.setTimeout(() => {
+      if (cancelled || engineRef.current || engineInitializingRef.current) return;
+      try {
+        const canvasElement = document.getElementById('canvasContainer');
+        if (canvasElement) {
+          void initEngine();
+        } else {
+          console.error("canvasContainer要素が見つかりません。エンジン初期化をスキップします。");
           setEngineReady(false);
         }
-      }, 100); // 100msの遅延を設定
-    }
+      } catch (error) {
+        console.error("エンジン初期化エラー:", error);
+        setEngineReady(false);
+      }
+    }, 100);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initializationTimer);
+    };
   }, [fontServiceReady]); // FontService初期化完了後に実行
+
+  // 未保存の変更の判定と、終了前の確認（メインプロセスからの問い合わせ）への応答。
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engineReady || !engine) return;
+    const fingerprint = () => new ProjectFileManager(engine).getContentFingerprint();
+
+    // 起動時の自動復元などが落ち着いてから、その内容を未保存判定の基準にする。
+    markProjectClean(fingerprint, PROJECT_LOAD_SETTLE_MS);
+    const handleStateRestored = () => markProjectClean(fingerprint, PROJECT_LOAD_SETTLE_MS);
+    window.addEventListener('project-state-restored', handleStateRestored);
+
+    const api = window.electronAPI;
+    const removeQuery = api?.onUnsavedChangesQuery?.(() => hasUnsavedChanges(fingerprint));
+    const removeSave = api?.onSaveBeforeClose?.(async () => {
+      try {
+        await new ProjectFileManager(engine).saveProject('project');
+        return true;
+      } catch (error) {
+        // 保存ダイアログのキャンセルもここに来る。終了は中止する。
+        console.warn('[App] 終了前の保存を中止しました:', error);
+        return false;
+      }
+    });
+
+    return () => {
+      window.removeEventListener('project-state-restored', handleStateRestored);
+      removeQuery?.();
+      removeSave?.();
+    };
+  }, [engineReady]);
+
+  // Windowsの関連付けや「プログラムから開く」で渡された.utaを、Engine準備後に読み込む。
+  useEffect(() => {
+    if (!engineReady || !engineRef.current) return;
+
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI?.consumePendingProject) return;
+
+    let disposed = false;
+    const loadPendingProject = async () => {
+      if (disposed || externalProjectLoadInProgressRef.current || !engineRef.current) return;
+      externalProjectLoadInProgressRef.current = true;
+      try {
+        // 起動時の自動復元が後から終わると、読み込んだ .uta が自動保存の内容で上書きされるため先に待つ。
+        await engineRef.current.whenAutoRestoreSettled();
+        while (!disposed && engineRef.current) {
+          const projectData = await electronAPI.consumePendingProject();
+          if (!projectData || disposed || !engineRef.current) break;
+          await new ProjectFileManager(engineRef.current).loadProjectData(projectData);
+        }
+      } catch (error) {
+        console.error('[App] 関連付けされたプロジェクトの読み込みに失敗しました:', error);
+        setProjectSaveNotice({ type: 'error', message: '指定されたプロジェクトを開けませんでした' });
+        if (saveNoticeTimerRef.current) clearTimeout(saveNoticeTimerRef.current);
+        saveNoticeTimerRef.current = setTimeout(() => setProjectSaveNotice(null), 4000);
+      } finally {
+        externalProjectLoadInProgressRef.current = false;
+      }
+    };
+
+    const unsubscribe = electronAPI.onProjectOpenRequested?.(() => {
+      void loadPendingProject();
+    });
+    void loadPendingProject();
+
+    return () => {
+      disposed = true;
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [engineReady]);
   
   // テンプレート変更の処理（エンジンを再初期化せずテンプレートのみ変更）
   useEffect(() => {
@@ -454,10 +612,14 @@ function App() {
         console.error("Engine cleanup error:", error);
       }
     }
+    engineInitializingRef.current = false;
   };
 
   // エンジン初期化
   const initEngine = async () => {
+    if (engineRef.current || engineInitializingRef.current) return;
+    engineInitializingRef.current = true;
+
     try {
       // テンプレートレジストリから動的にテンプレートを取得
       let template = getTemplateById(selectedTemplate);
@@ -632,6 +794,8 @@ function App() {
     } catch (error) {
       console.error("エンジン初期化エラー:", error);
       setEngineReady(false);
+    } finally {
+      engineInitializingRef.current = false;
     }
   };
 
@@ -758,6 +922,12 @@ function App() {
         debugInfo={debugInfo}
         timingDebugInfo={timingDebugInfo}
       />
+
+      {projectSaveNotice && (
+        <div className={`project-save-notice ${projectSaveNotice.type}`} role="status" aria-live="polite">
+          {projectSaveNotice.message}
+        </div>
+      )}
 
       {/* エンジン初期化中はローディングオーバーレイを表示 */}
       {!engineReady && (

@@ -7,6 +7,7 @@ export interface ProjectData {
   templates: Record<string, string>;
   parameters: Record<string, any>;
   timing: any;
+  postEffectConfig?: Record<string, number | boolean>;
   metadata: {
     createdAt: string;
     modifiedAt: string;
@@ -18,7 +19,7 @@ export interface MediaFileInfo {
   path: string;
   name: string;
   size: number;
-  type: 'video' | 'audio';
+  type: 'video' | 'audio' | 'image';
   lastModified: Date;
   duration?: number;
   resolution?: {
@@ -86,6 +87,7 @@ export interface FontInfo {
   style: string;
   weight: string;
   path?: string;
+  variable?: boolean;
 }
 
 export interface TemplateInfo {
@@ -99,6 +101,7 @@ export interface TemplateInfo {
 // IPC Channel definitions
 export interface MainToRendererChannels {
   'file:project-loaded': (projectData: ProjectData) => void;
+  'file:open-project-requested': () => void;
   'file:media-loaded': (mediaInfo: MediaFileInfo) => void;
   'export:progress': (progress: ExportProgress) => void;
   'export:completed': (outputPath: string) => void;
@@ -107,9 +110,12 @@ export interface MainToRendererChannels {
 }
 
 export interface RendererToMainChannels {
-  'file:save-project': (projectData: ProjectData) => Promise<string>;
+  'file:save-project': (projectData: ProjectData, options?: { saveAs?: boolean }) => Promise<string>;
   'file:load-project': () => Promise<ProjectData>;
-  'file:select-media': (type: 'video' | 'audio') => Promise<MediaFileInfo>;
+  'file:consume-pending-project': () => Promise<ProjectData | null>;
+  'file:select-media': (type: 'video' | 'audio' | 'image') => Promise<MediaFileInfo>;
+  'file:export-srt': (content: string, defaultFileName?: string) => Promise<string | null>;
+  'file:export-png': (imageData: Uint8Array, defaultFileName?: string) => Promise<string | null>;
   'export:start': (options: ExportOptions) => Promise<void>;
   'export:cancel': () => Promise<void>;
   'export:frame-ready': (frameData: string) => void;

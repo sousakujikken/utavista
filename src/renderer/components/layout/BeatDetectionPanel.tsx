@@ -69,9 +69,7 @@ const BeatDetectionPanel: React.FC<BeatDetectionPanelProps> = ({ engine }) => {
         );
         
         // エンジンにビート情報を送信
-        if (engine.setBeatMarkers) {
-          engine.setBeatMarkers(result.beats);
-        }
+        engine.setBeatMarkers(result.beats);
         
         // タイムラインにビートマーカー表示イベントを発火
         const beatEvent = new CustomEvent('beat-detection-completed', {
@@ -82,7 +80,9 @@ const BeatDetectionPanel: React.FC<BeatDetectionPanelProps> = ({ engine }) => {
         console.log('Beat detection completed:', {
           beatsCount: result.beats.length,
           bpm: result.bpm,
-          averageConfidence: result.beats.reduce((sum, beat) => sum + beat.confidence, 0) / result.beats.length
+          averageConfidence: result.beats.length > 0
+            ? result.beats.reduce((sum, beat) => sum + beat.confidence, 0) / result.beats.length
+            : 0
         });
       } else {
         setErrorMessage('ビート検出に失敗しました');
@@ -131,7 +131,7 @@ const BeatDetectionPanel: React.FC<BeatDetectionPanelProps> = ({ engine }) => {
     setAnalysisResult(null);
     setSuccessMessage(null);
     
-    if (engine && engine.setBeatMarkers) {
+    if (engine) {
       engine.setBeatMarkers([]);
     }
     
@@ -164,15 +164,15 @@ const BeatDetectionPanel: React.FC<BeatDetectionPanelProps> = ({ engine }) => {
 
         {/* プリセット設定 */}
         <div className="u-mb-md">
-          <label className="u-text-secondary u-mb-xs">プリセット設定:</label>
+          <label className="u-text-secondary u-mb-xs">プリセット</label>
           <div className="u-flex u-gap-sm">
-            <Button variant="tertiary" onClick={() => applyPreset('sensitive')}>
+            <Button variant="secondary" onClick={() => applyPreset('sensitive')}>
               高感度
             </Button>
-            <Button variant="tertiary" onClick={() => applyPreset('standard')}>
+            <Button variant="secondary" onClick={() => applyPreset('standard')}>
               標準
             </Button>
-            <Button variant="tertiary" onClick={() => applyPreset('strict')}>
+            <Button variant="secondary" onClick={() => applyPreset('strict')}>
               厳格
             </Button>
           </div>

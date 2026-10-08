@@ -1,109 +1,54 @@
-import React, { useState, useEffect } from 'react';
-import { FontService, FontFamily, FontStyle } from '../../services/FontService';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FontService, FontFamily } from '../../services/FontService';
 import './FontSelector.css';
 
 interface FontSelectorProps {
   value: string;
-  onChange: (fontFamily: string) => void;
+  weightValue: string;
+  onChange: (fontFamily: string, fontWeight: string) => void;
   disabled?: boolean;
 }
 
-const FontSelector: React.FC<FontSelectorProps> = ({ value, onChange, disabled = false }) => {
+const FontSelector: React.FC<FontSelectorProps> = ({ value, weightValue, onChange, disabled = false }) => {
   const [fontFamilies, setFontFamilies] = useState<FontFamily[]>([]);
-  const [selectedFamily, setSelectedFamily] = useState<string>('');
-  const [selectedStyle, setSelectedStyle] = useState<string>('');
-  const [availableStyles, setAvailableStyles] = useState<FontStyle[]>([]);
 
-  // フォントファミリーリストを取得
   useEffect(() => {
-    const loadFontFamilies = () => {
-      const families = FontService.getFontFamiliesWithStyles();
-      setFontFamilies(families);
-    };
-
-    // 初回読み込み
+    const loadFontFamilies = () => setFontFamilies(FontService.getFontFamiliesWithStyles());
     loadFontFamilies();
-
-    // 設定変更イベントのリスナー
-    const handleFontSettingsChange = () => {
-      // FontServiceの設定を再読み込み
-      FontService.reloadFontSettings();
-      // フォントファミリーリストを再取得
-      loadFontFamilies();
-    };
-
-    window.addEventListener('fontSettingsChanged', handleFontSettingsChange);
-
-    return () => {
-      window.removeEventListener('fontSettingsChanged', handleFontSettingsChange);
-    };
+    window.addEventListener('fontSettingsChanged', loadFontFamilies);
+    return () => window.removeEventListener('fontSettingsChanged', loadFontFamilies);
   }, []);
 
-  // 現在の値からファミリーとスタイルを解析
-  useEffect(() => {
-    if (value && fontFamilies.length > 0) {
-      // 完全一致するフォント名を検索
-      let foundFamily = '';
-      let foundStyle = '';
+  const selectedFamily = useMemo(() => {
+    if (fontFamilies.some(font => font.family === value)) return value;
+    const normalizedValue = FontService.normalizeFontFamily(value);
+    if (fontFamilies.some(font => font.family === normalizedValue)) return normalizedValue;
+    const legacyMatch = fontFamilies.find(font => font.styles.some(style => style.fullName === value));
+    return legacyMatch?.family || '';
+  }, [fontFamilies, value]);
 
-      for (const family of fontFamilies) {
-        for (const style of family.styles) {
-          if (style.fullName === value) {
-            foundFamily = family.family;
-            foundStyle = style.fullName;
-            break;
-          }
-        }
-        if (foundFamily) break;
-      }
+  const weightOptions = useMemo(
+    () => selectedFamily ? FontService.getFontWeightOptions(selectedFamily) : [],
+    [selectedFamily, fontFamilies]
+  );
+  const selectedWeight = weightOptions.some(option => option.value === weightValue)
+    ? weightValue
+    : weightOptions.find(option => option.value === '400')?.value || weightOptions[0]?.value || '400';
 
-      // 完全一致が見つからない場合は、ファミリー名で検索
-      if (!foundFamily) {
-        const family = fontFamilies.find(f => f.family === value);
-        if (family) {
-          foundFamily = family.family;
-          foundStyle = family.styles[0]?.fullName || family.family;
-        }
-      }
-
-      // 見つからない場合は最初のフォントを選択
-      if (!foundFamily && fontFamilies.length > 0) {
-        foundFamily = fontFamilies[0].family;
-        foundStyle = fontFamilies[0].styles[0]?.fullName || fontFamilies[0].family;
-      }
-
-      setSelectedFamily(foundFamily);
-      setSelectedStyle(foundStyle);
-      
-      // 利用可能なスタイルを更新
-      const family = fontFamilies.find(f => f.family === foundFamily);
-      if (family) {
-        setAvailableStyles(family.styles);
-      }
-    }
-  }, [value, fontFamilies]);
-
-  // フォントファミリーが変更された時の処理
-  const handleFamilyChange = (familyName: string) => {
-    setSelectedFamily(familyName);
-    
-    const family = fontFamilies.find(f => f.family === familyName);
-    if (family) {
-      setAvailableStyles(family.styles);
-      
-      // 最初のスタイルを自動選択
-      const firstStyle = family.styles[0];
-      if (firstStyle) {
-        setSelectedStyle(firstStyle.fullName);
-        onChange(firstStyle.fullName);
-      }
-    }
+  const handleFamilyChange = async (familyName: string) => {
+    if (!familyName) return;
+    const options = FontService.getFontWeightOptions(familyName);
+    const nextWeight = options.some(option => option.value === weightValue)
+      ? weightValue
+      : options.find(option => option.value === '400')?.value || options[0]?.value || '400';
+    await FontService.ensureFontLoaded(familyName, nextWeight);
+    onChange(familyName, nextWeight);
   };
 
-  // フォントスタイルが変更された時の処理
-  const handleStyleChange = (styleName: string) => {
-    setSelectedStyle(styleName);
-    onChange(styleName);
+  const handleWeightChange = async (fontWeight: string) => {
+    if (!selectedFamily) return;
+    await FontService.ensureFontLoaded(selectedFamily, fontWeight);
+    onChange(selectedFamily, fontWeight);
   };
 
   return (
@@ -112,32 +57,28 @@ const FontSelector: React.FC<FontSelectorProps> = ({ value, onChange, disabled =
         <label className="font-selector-label">フォントファミリー:</label>
         <select
           value={selectedFamily}
-          onChange={(e) => handleFamilyChange(e.target.value)}
+          onChange={event => void handleFamilyChange(event.target.value)}
           disabled={disabled}
           className="font-family-select"
         >
           <option value="">フォントを選択...</option>
-          {fontFamilies.map(family => (
-            <option key={family.family} value={family.family}>
-              {family.family}
-            </option>
+          {fontFamilies.map(font => (
+            <option key={font.family} value={font.family}>{font.family}</option>
           ))}
         </select>
       </div>
 
-      {selectedFamily && availableStyles.length > 1 && (
+      {selectedFamily && weightOptions.length > 0 && (
         <div className="font-style-selector">
-          <label className="font-selector-label">スタイル:</label>
+          <label className="font-selector-label">書体:</label>
           <select
-            value={selectedStyle}
-            onChange={(e) => handleStyleChange(e.target.value)}
+            value={selectedWeight}
+            onChange={event => void handleWeightChange(event.target.value)}
             disabled={disabled}
             className="font-style-select"
           >
-            {availableStyles.map(style => (
-              <option key={style.fullName} value={style.fullName}>
-                {style.displayName}
-              </option>
+            {weightOptions.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
         </div>
@@ -145,13 +86,8 @@ const FontSelector: React.FC<FontSelectorProps> = ({ value, onChange, disabled =
 
       {selectedFamily && (
         <div className="font-preview">
-          <div 
-            className="font-preview-text"
-            style={{ 
-              fontFamily: selectedStyle || selectedFamily
-            }}
-          >
-            {selectedFamily} - {availableStyles.find(s => s.fullName === selectedStyle)?.displayName || 'Regular'}
+          <div className="font-preview-text" style={{ fontFamily: selectedFamily, fontWeight: selectedWeight }}>
+            {selectedFamily} — あいうえお ABC 123
           </div>
         </div>
       )}

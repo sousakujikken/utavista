@@ -1,30 +1,16 @@
-/* TemplateTab.css */
-.template-tab {
+/* SceneSettingsTab.css */
+/* 余白・スクロールは共通の .panel-content に従う */
+.scene-settings-tab {
   display: flex;
   flex-direction: column;
-  padding: var(--space-md);
-  height: 100%;
-  overflow-y: auto;
-  background-color: var(--bg-level-0);
   color: var(--text-primary);
-  font-family: var(--font-primary);
-}
-
-.template-tab h2 {
-  margin-top: 0;
-  margin-bottom: var(--space-md);
-  border-bottom: 1px solid var(--border-prominent);
-  padding-bottom: var(--space-sm);
-  color: var(--text-primary);
-  font-family: var(--font-primary);
-  font-size: var(--text-title);
-  font-weight: 600;
 }
 
 .template-section,
 .object-template-section,
-.params-section {
-  margin-bottom: var(--space-xl);
+.params-section,
+.post-effect-section {
+  margin-bottom: var(--space-md);
   background-color: var(--bg-level-3);
   border-radius: var(--radius-medium);
   padding: var(--space-md);
@@ -33,13 +19,14 @@
 
 .template-section h3,
 .object-template-section h3,
-.params-section h3 {
+.params-section h3,
+.post-effect-section h3 {
   margin-top: 0;
   margin-bottom: var(--space-sm);
-  color: var(--text-tertiary);
+  color: var(--text-primary);
   font-family: var(--font-primary);
   font-size: var(--text-subtitle);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .template-section p,
@@ -96,10 +83,9 @@
   position: sticky;
   top: 0;
   z-index: 10;
-  background-color: var(--bg-primary);
-  margin-bottom: var(--space-lg);
-  padding: var(--space-sm) 0;
-  border-bottom: 1px solid var(--border-subtle);
+  background-color: var(--bg-level-0);
+  margin-bottom: var(--space-md);
+  padding: 0;
 }
 
 .switch-container {
@@ -205,22 +191,22 @@
 }
 
 /* テンプレートタブのスクロールバー */
-.template-tab::-webkit-scrollbar {
+.scene-settings-tab::-webkit-scrollbar {
   width: 8px;
 }
 
-.template-tab::-webkit-scrollbar-track {
+.scene-settings-tab::-webkit-scrollbar-track {
   background: var(--bg-level-0);
   border-radius: var(--radius-small);
 }
 
-.template-tab::-webkit-scrollbar-thumb {
-  background: #F0059D;
-  border-radius: 4px;
+.scene-settings-tab::-webkit-scrollbar-thumb {
+  background: var(--color-accent);
+  border-radius: var(--radius-small);
 }
 
-.template-tab::-webkit-scrollbar-thumb:hover {
-  background: #d0047d;
+.scene-settings-tab::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent-hover);
 }
 
 /* オブジェクト制御セクション */
@@ -405,14 +391,9 @@
   line-height: 1.4;
 }
 
-/* 選択オブジェクトモードの緑色背景 */
+/* 選択オブジェクトの個別設定を編集中であることを、選択状態と同じアクセントカラーの左帯で示す */
 .selection-mode-background {
-  background: linear-gradient(135deg, 
-    rgba(34, 139, 34, 0.15) 0%, 
-    rgba(50, 150, 50, 0.1) 50%, 
-    rgba(34, 139, 34, 0.15) 100%) !important;
-  border: 2px solid rgba(34, 139, 34, 0.3) !important;
-  box-shadow: 0 0 15px rgba(34, 139, 34, 0.2);
+  border-left: 3px solid var(--color-accent);
 }
 
 /* 個別設定状態表示セクション */
@@ -425,12 +406,6 @@
   border-radius: 8px;
   padding: 1rem;
   margin: 1rem 0;
-}
-
-.switch-container {
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.5rem;
 }
 
 .switch-label {
@@ -524,4 +499,37 @@
   background-color: rgba(100, 100, 100, 0.15);
   color: #d0d0d0;
   border: 1px solid rgba(100, 100, 100, 0.3);
+}
+
+.scene-settings-tab > p,
+.params-section > p,
+.post-effect-section > p {
+  color: var(--text-muted);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.post-effect-section {
+  background-color: var(--bg-level-3);
+  border-radius: var(--radius-medium);
+  padding: var(--space-md);
+  border: 1px solid var(--border-standard);
+}
+
+.clear-params-button {
+  width: 100%;
+  margin: var(--space-sm) 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  color: var(--text-primary);
+  background: var(--bg-level-5);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-small);
+  font-family: var(--font-primary);
+  font-size: var(--text-body);
+  cursor: pointer;
+}
+
+.clear-params-button:hover {
+  background: var(--bg-level-7);
+  border-color: var(--border-prominent);
 }

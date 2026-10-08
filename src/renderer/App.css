@@ -60,3 +60,26 @@
   color: white;
   text-align: center;
 }
+
+.project-save-notice {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1200;
+  min-width: 220px;
+  padding: 10px 14px;
+  border: 1px solid #5c6470;
+  border-radius: 6px;
+  background: #252a31;
+  color: #f4f6f8;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+}
+
+.project-save-notice.success {
+  border-color: #4d9b72;
+}
+
+.project-save-notice.error {
+  border-color: #c95e69;
+}

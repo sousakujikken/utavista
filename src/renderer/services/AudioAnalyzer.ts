@@ -1,3 +1,5 @@
+import { BeatDetector } from './BeatDetector';
+
 /**
  * 音楽ファイルの解析とビート検出を行うサービス
  */
@@ -26,6 +28,7 @@ export interface AnalysisResult {
 export class AudioAnalyzer {
   private audioContext: AudioContext | null = null;
   private analyserNode: AnalyserNode | null = null;
+  private readonly beatDetector = new BeatDetector();
   
   constructor() {
     this.initializeAudioContext();
@@ -108,15 +111,14 @@ export class AudioAnalyzer {
       const energyData = this.calculateEnergyData(filteredData, audioBuffer.sampleRate);
       
       // ビート検出
-      const beats = this.detectBeats(
+      const beats = this.beatDetector.detect(
         energyData,
         audioBuffer.sampleRate,
-        audioBuffer.duration,
         settings
       );
       
       // BPM計算
-      const bpm = this.calculateBPM(beats, audioBuffer.duration);
+      const bpm = this.beatDetector.calculateBpm(beats);
       
       // 平均エネルギー計算
       const averageEnergy = energyData.reduce((sum, val) => sum + val, 0) / energyData.length;
@@ -218,115 +220,6 @@ export class AudioAnalyzer {
     }
     
     return new Float32Array(energyData);
-  }
-  
-  /**
-   * ビート検出アルゴリズム
-   */
-  private detectBeats(
-    energyData: Float32Array,
-    sampleRate: number,
-    duration: number,
-    settings: BeatDetectionSettings
-  ): BeatMarker[] {
-    const beats: BeatMarker[] = [];
-    const windowSize = Math.floor(sampleRate * 0.05 / 4); // エネルギーデータ用のウィンドウサイズ
-    
-    // 動的閾値計算用のローカル平均
-    const localAverageWindow = Math.floor(energyData.length * 0.1); // 全体の10%
-    
-    for (let i = localAverageWindow; i < energyData.length - localAverageWindow; i++) {
-      const currentEnergy = energyData[i];
-      
-      // ローカル平均計算
-      let localSum = 0;
-      for (let j = i - localAverageWindow; j < i + localAverageWindow; j++) {
-        localSum += energyData[j];
-      }
-      const localAverage = localSum / (2 * localAverageWindow);
-      
-      // 閾値を超えているかチェック
-      const threshold = localAverage * (1 + settings.threshold) * settings.sensitivity;
-      
-      if (currentEnergy > threshold) {
-        // ピーク検出（前後の値と比較）
-        const isPeak = (i === 0 || energyData[i] >= energyData[i - 1]) &&
-                      (i === energyData.length - 1 || energyData[i] >= energyData[i + 1]);
-        
-        if (isPeak) {
-          const timestamp = (i * windowSize * 4 / sampleRate) * 1000; // msに変換
-          const confidence = Math.min(currentEnergy / threshold, 1.0);
-          
-          // 連続するビートを避ける（最小間隔: 100ms）
-          const lastBeat = beats[beats.length - 1];
-          if (!lastBeat || timestamp - lastBeat.timestamp > 100) {
-            beats.push({
-              timestamp,
-              confidence,
-              energy: currentEnergy
-            });
-          }
-        }
-      }
-    }
-    
-    // BPM範囲でフィルタリング
-    return this.filterBeatsByBPM(beats, settings.minBPM, settings.maxBPM, duration);
-  }
-  
-  /**
-   * BPM範囲でビートをフィルタリング
-   */
-  private filterBeatsByBPM(
-    beats: BeatMarker[],
-    minBPM: number,
-    maxBPM: number,
-    duration: number
-  ): BeatMarker[] {
-    if (beats.length < 2) return beats;
-    
-    // 隣接するビート間隔を計算
-    const intervals: number[] = [];
-    for (let i = 1; i < beats.length; i++) {
-      intervals.push(beats[i].timestamp - beats[i - 1].timestamp);
-    }
-    
-    // 間隔の統計を取る
-    intervals.sort((a, b) => a - b);
-    const medianInterval = intervals[Math.floor(intervals.length / 2)];
-    const estimatedBPM = 60000 / medianInterval; // ms to BPM
-    
-    console.log('Estimated BPM from intervals:', estimatedBPM);
-    
-    // BPM範囲外の場合は調整
-    if (estimatedBPM < minBPM || estimatedBPM > maxBPM) {
-      // 信頼度の高いビートのみを保持
-      return beats
-        .filter(beat => beat.confidence > 0.7)
-        .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, Math.floor(beats.length * 0.8));
-    }
-    
-    return beats;
-  }
-  
-  /**
-   * ビートからBPMを計算
-   */
-  private calculateBPM(beats: BeatMarker[], duration: number): number {
-    if (beats.length < 2) return 0;
-    
-    // ビート間隔を計算
-    const intervals: number[] = [];
-    for (let i = 1; i < beats.length; i++) {
-      intervals.push(beats[i].timestamp - beats[i - 1].timestamp);
-    }
-    
-    // 平均間隔を計算
-    const averageInterval = intervals.reduce((sum, interval) => sum + interval, 0) / intervals.length;
-    
-    // BPMに変換
-    return Math.round(60000 / averageInterval);
   }
   
   /**

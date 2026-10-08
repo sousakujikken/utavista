@@ -13,6 +13,8 @@ export interface ParamConfig {
   step?: number;
   label?: string;
   options?: string[] | Array<{ value: any, label: string }> | (() => string[]);
+  /** 現在の値からこの項目を表示するか判定する（未指定なら常に表示）。 */
+  visibleWhen?: (values: Record<string, any>) => boolean;
 }
 
 interface ParamEditorProps {
@@ -67,6 +69,12 @@ const ParamEditor: React.FC<ParamEditorProps> = ({
     // 親コンポーネントに変更を通知
     onChange(updatedValues);
   };
+
+  const handleFontChange = (fontFamily: string, fontWeight: string) => {
+    const updatedValues = { ...values, fontFamily, fontWeight };
+    setValues(updatedValues);
+    onChange(updatedValues);
+  };
   
   // 色の最終確定時のハンドラ（フォーカス離脱時）
   const handleColorBlur = (name: string, value: string) => {
@@ -101,7 +109,7 @@ const ParamEditor: React.FC<ParamEditorProps> = ({
   return (
     <div className="param-editor">
       <div className="param-list">
-        {paramConfig.map(param => (
+        {paramConfig.map(param => param.name === 'fontWeight' || (param.visibleWhen && !param.visibleWhen(values)) ? null : (
           <div key={param.name} className="param-item">
             <div className="param-label">
               {param.label || param.name}
@@ -242,7 +250,8 @@ const ParamEditor: React.FC<ParamEditorProps> = ({
               {param.type === 'font' && (
                 <FontSelector
                   value={values[param.name] || ''}
-                  onChange={(fontFamily) => handleChange(param.name, fontFamily)}
+                  weightValue={values.fontWeight || '700'}
+                  onChange={handleFontChange}
                   disabled={disabled}
                 />
               )}

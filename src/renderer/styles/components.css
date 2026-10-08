@@ -289,7 +289,7 @@
 }
 
 .panel-content { 
-  padding: var(--space-sm); 
+  padding: var(--space-md); 
   background: var(--bg-level-0); 
   color: var(--text-secondary); 
   height: calc(100% - 40px);
@@ -298,17 +298,39 @@
   font-size: var(--text-body);
 }
 
+/* タブ内に埋め込んだパネル（ビート検出など）は外側の余白・スクロールを使う */
+.panel-content .panel-content {
+  padding: 0;
+  height: auto;
+  overflow: visible;
+}
+
 .tab-panels {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-.tab-panels > div {
+.sidebar-tab-panel {
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   flex: 1;
+  min-height: 0;
+  background: var(--bg-level-0);
+}
+
+/* スクロールはTab.Panelだけが担当し、各タブ本体の二重スクロールを止める。 */
+.sidebar-tab-panel > .panel-content,
+.sidebar-tab-panel > .template-tab,
+.sidebar-tab-panel > .project-tab,
+.sidebar-tab-panel > .settings-tab {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  box-sizing: border-box;
 }
 
 /* コンテンツタブセクションスタイル - テンプレートタブと統一 */

@@ -42,79 +42,6 @@ const WaveformPanel: React.FC<WaveformPanelProps> = ({
   const isSeekingRef = useRef(false);
   const lastSeekTimeRef = useRef(0);
   
-  // シークイベントハンドラをコンポーネントトップレベルで定義
-  const handleSeek = useCallback((progress: number) => {
-    // 統一された全体長（totalDuration）に基づいてシーク位置を計算
-    const seekTime = progress * totalDuration;
-    
-    
-    // シーク状態を記録
-    isSeekingRef.current = true;
-    lastSeekTimeRef.current = Date.now();
-    
-    // 直接Engineを呼び出して遅延を最小化
-    if (engine) {
-      try {
-        engine.seek(seekTime);
-        
-        // シーク直後に波形も即座に同期（複数回実行して確実に）
-        if (wavesurferRef.current) {
-          wavesurferRef.current.seekTo(progress);
-          
-          // 少し遅延してもう一度同期（確実性向上）
-          setTimeout(() => {
-            if (wavesurferRef.current) {
-              wavesurferRef.current.seekTo(progress);
-            }
-          }, 16); // 1フレーム後
-          
-          // さらに遅延してもう一度（最終確認）
-          setTimeout(() => {
-            if (wavesurferRef.current) {
-              const currentProgress = wavesurferRef.current.getCurrentTime() / wavesurferRef.current.getDuration();
-              const progressDiff = Math.abs(currentProgress - progress);
-              
-              if (progressDiff > 0.01) { // 1%以上のズレがある場合
-                wavesurferRef.current.seekTo(progress);
-              }
-            }
-            
-            // シーク状態を解除
-            isSeekingRef.current = false;
-          }, 100); // 100ms後
-        }
-      } catch (error) {
-        console.error('[WaveformPanel] Direct engine seek failed:', error);
-        isSeekingRef.current = false;
-        // フォールバック: イベント経由
-        const waveformSeekEvent = new CustomEvent('waveform-seek', {
-          detail: { 
-            currentTime: seekTime,
-            timestamp: Date.now(),
-            source: 'WaveformPanel-Fallback',
-            progress: progress,
-            totalDuration: totalDuration
-          }
-        });
-        window.dispatchEvent(waveformSeekEvent);
-      }
-    } else {
-      // Engineが利用できない場合はイベント経由
-      console.warn('[WaveformPanel] Engine not available, using event fallback');
-      isSeekingRef.current = false;
-      const waveformSeekEvent = new CustomEvent('waveform-seek', {
-        detail: { 
-          currentTime: seekTime,
-          timestamp: Date.now(),
-          source: 'WaveformPanel-NoEngine',
-          progress: progress,
-          totalDuration: totalDuration
-        }
-      });
-      window.dispatchEvent(waveformSeekEvent);
-    }
-  }, [totalDuration, engine]);
-  
   // リアルタイム音量分析機能
   const initializeAudioAnalyzer = useCallback(() => {
     if (!engine || !audioUrl) return;
@@ -245,41 +172,19 @@ const WaveformPanel: React.FC<WaveformPanelProps> = ({
     isSeekingRef.current = true;
     lastSeekTimeRef.current = Date.now();
     
-    // 直接Engineを呼び出して遅延を最小化
+    // WaveSurfer自身がクリック位置へ移動済みなので、Engineだけを一度シークする。
     if (engine) {
       try {
-        engine.seek(seekTime);
+        void engine.seek(seekTime);
       } catch (error) {
         console.error('[WaveformPanel] Direct engine click seek failed:', error);
       }
+    } else if (onSeek) {
+      onSeek(seekTime);
     }
-    
-    // 波形の表示も即座に更新（Engineの更新と並行実行）
-    if (wavesurferRef.current) {
-      wavesurferRef.current.seekTo(progress);
-      
-      // 多段階同期で確実性を向上
-      setTimeout(() => {
-        if (wavesurferRef.current) {
-          wavesurferRef.current.seekTo(progress);
-        }
-      }, 16);
-      
-      setTimeout(() => {
-        if (wavesurferRef.current) {
-          const currentProgress = wavesurferRef.current.getCurrentTime() / wavesurferRef.current.getDuration();
-          const progressDiff = Math.abs(currentProgress - progress);
-          
-          if (progressDiff > 0.01) {
-            // 最終シーク修正ログ削除済み
-            wavesurferRef.current.seekTo(progress);
-          }
-        }
-        
-        // シーク状態を解除
-        isSeekingRef.current = false;
-      }, 100);
-    }
+    requestAnimationFrame(() => {
+      isSeekingRef.current = false;
+    });
   };
   
   // 音声ファイルURLの監視
@@ -511,19 +416,6 @@ const WaveformPanel: React.FC<WaveformPanelProps> = ({
       }
     }
   }, [currentTime, totalDuration, isReady, engine]);
-  
-  // シークイベントリスナーの設定
-  useEffect(() => {
-    if (wavesurferRef.current && isReady) {
-      wavesurferRef.current.on('seek', handleSeek);
-      
-      return () => {
-        if (wavesurferRef.current) {
-          wavesurferRef.current.un('seek', handleSeek);
-        }
-      };
-    }
-  }, [isReady, handleSeek]);
   
   // 簡素化されたデバッグ機能（開発時のみ）
   const outputDebugReport = useCallback(() => {

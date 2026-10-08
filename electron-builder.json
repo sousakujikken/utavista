@@ -4,6 +4,7 @@
   "directories": {
     "output": "dist-electron"
   },
+  "afterPack": "scripts/bundle-ffmpeg.cjs",
   "files": [
     "dist/main/**/*",
     "dist/renderer/**/*",
@@ -15,6 +16,14 @@
       "from": "resources",
       "to": "resources",
       "filter": ["**/*"]
+    }
+  ],
+  "fileAssociations": [
+    {
+      "ext": "uta",
+      "name": "UTAVISTA Project",
+      "description": "UTAVISTA project file",
+      "role": "Editor"
     }
   ],
   "mac": {

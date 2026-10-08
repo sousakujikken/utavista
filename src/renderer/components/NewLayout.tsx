@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import PreviewArea from './layout/PreviewArea';
-import TemplateTab from './layout/TemplateTab';
+import SceneSettingsTab from './layout/SceneSettingsTab';
 import PlayerPanel from './layout/PlayerPanel';
 import TimelinePanel from './layout/TimelinePanel';
 import ContentTab from './layout/ContentTab';
 import ProjectTab from './layout/ProjectTab';
+import ExportTab from './layout/ExportTab';
 import SettingsTab from './layout/SettingsTab';
-import DebugTab from './layout/DebugTab';
 import ZoomControls from './layout/ZoomControls';
 import SidebarTabs from './ui/SidebarTabs';
 import Engine from '../engine/Engine';
@@ -17,8 +17,13 @@ import { AutoScrollDebugPanel } from './debug/AutoScrollDebugPanel';
 import '../styles/NewLayout.css';
 import '../styles/components.css';
 
-// ズームレベルの定義（表示時間）
-const ZOOM_LEVELS = [10000, 30000, 60000, 120000]; // 10秒, 30秒, 60秒, 120秒
+// タイムラインの表示時間（ms）。段階を持たず、下限から曲全体まで連続的に変更できる。
+const MIN_VIEW_DURATION = 2000;
+const DEFAULT_VIEW_DURATION = 60000;
+/** ズームボタン1回あたりの倍率 */
+const ZOOM_BUTTON_FACTOR = 1.5;
+/** ズームボタンのアニメーション時間 */
+const ZOOM_ANIMATION_MS = 180;
 
 interface NewLayoutProps {
   onPlay: () => void;
@@ -63,18 +68,16 @@ const NewLayout: React.FC<NewLayoutProps> = ({
   onPause,
   onReset,
   onSeek,
-  onTemplateChange,
   isPlaying,
   currentTime,
   totalDuration,
-  selectedTemplate,
   engine, // propsからengineを受け取る
-  template, // propsからtemplateを受け取る
+  template, // タイムライン描画では固定コンポーザーの参照を使用する
   debugInfo,
   timingDebugInfo
 }) => {
   // ズーム関連の状態
-  const [zoomLevel, setZoomLevel] = useState(2); // 初期値を60秒表示に設定
+  const [viewDurationSetting, setViewDurationSetting] = useState(DEFAULT_VIEW_DURATION); // 起動時は60秒表示
   const [viewStart, setViewStart] = useState(0); // 表示開始時間
   
   // 歌詞編集モードの状態
@@ -98,8 +101,9 @@ const NewLayout: React.FC<NewLayoutProps> = ({
     seekSource: 'auto' as 'user' | 'auto' | 'engine'
   });
   
-  // 現在のズームレベルでの表示範囲、ただしdurationを超えない
-  const viewDuration = Math.min(ZOOM_LEVELS[zoomLevel], totalDuration);
+  // 表示範囲。下限未満にはせず、曲全体（totalDuration）を超えない
+  const maxViewDuration = Math.max(MIN_VIEW_DURATION, totalDuration);
+  const viewDuration = Math.min(Math.max(viewDurationSetting, MIN_VIEW_DURATION), totalDuration);
   const viewEnd = Math.min(viewStart + viewDuration, totalDuration);
   
   // ViewportManager インスタンス
@@ -124,56 +128,83 @@ const NewLayout: React.FC<NewLayoutProps> = ({
     }
   }, [engine]);
   
-  // 歌詞データの長さに応じて最適なズームレベルを選択（現在は使用しない）
-  const getOptimalZoomLevel = (duration: number): number => {
-    // 30秒未満の場合は10秒表示
-    if (duration <= 30000) return 0;
-    // 60秒未満の場合は30秒表示
-    if (duration <= 60000) return 1;
-    // 120秒未満の場合は60秒表示
-    if (duration <= 120000) return 2;
-    // それ以上は120秒表示
-    return 3;
-  };
-  
-  // totalDurationが変更されたときにズームレベルを調整（コメントアウト：常に60秒で起動）
-  // useEffect(() => {
-  //   const optimalZoomLevel = getOptimalZoomLevel(totalDuration);
-  //   setZoomLevel(optimalZoomLevel);
-  // }, [totalDuration]);
-  
-  // ズームイン・アウトハンドラ（ViewportManager使用版）
-  const handleZoomIn = () => {
-    if (zoomLevel > 0) {
-      const newZoomLevel = zoomLevel - 1;
-      const newViewDuration = Math.min(ZOOM_LEVELS[newZoomLevel], totalDuration);
-      
-      setZoomLevel(newZoomLevel);
-      
-      // ViewportManagerで中心位置を計算
-      viewportManager.updateViewport(viewStart, newViewDuration);
-      const newViewStart = viewportManager.calculateCenteredViewStart(currentTime);
-      setViewStart(newViewStart);
+  // ズーム処理は連続して呼ばれる（ホイール・アニメーション）ため、最新の表示範囲を参照で持つ
+  const viewStateRef = useRef({ viewStart, viewDuration, totalDuration, currentTime });
+  viewStateRef.current = { viewStart, viewDuration, totalDuration, currentTime };
+  const zoomAnimationRef = useRef<number | null>(null);
+  const pendingWheelRef = useRef<{ factor: number; anchorTime: number; anchorRatio: number } | null>(null);
+  const wheelFrameRef = useRef<number | null>(null);
+
+  /**
+   * 表示時間を変更する。anchorTime の時刻が表示幅の anchorRatio（0=左端、1=右端）の位置に留まるよう表示開始時刻も調整する。
+   */
+  const applyZoom = useCallback((targetDuration: number, anchorTime: number, anchorRatio: number) => {
+    const { totalDuration: total } = viewStateRef.current;
+    if (!(total > 0)) return;
+    const duration = Math.min(Math.max(targetDuration, MIN_VIEW_DURATION), Math.max(MIN_VIEW_DURATION, total));
+    const visibleDuration = Math.min(duration, total);
+    const start = Math.min(Math.max(0, anchorTime - anchorRatio * visibleDuration), Math.max(0, total - visibleDuration));
+    viewStateRef.current = { ...viewStateRef.current, viewStart: start, viewDuration: visibleDuration };
+    setViewDurationSetting(duration);
+    setViewStart(start);
+    viewportManager.updateViewport(start, visibleDuration);
+  }, [viewportManager]);
+
+  const cancelZoomAnimation = () => {
+    if (zoomAnimationRef.current !== null) {
+      cancelAnimationFrame(zoomAnimationRef.current);
+      zoomAnimationRef.current = null;
     }
   };
-  
-  const handleZoomOut = () => {
-    if (zoomLevel < ZOOM_LEVELS.length - 1) {
-      const newZoomLevel = zoomLevel + 1;
-      const newViewDuration = Math.min(ZOOM_LEVELS[newZoomLevel], totalDuration);
-      
-      // 最大時間でもデータの長さを超えない場合はズームアウトしない
-      if (newViewDuration > viewDuration) {
-        setZoomLevel(newZoomLevel);
-        
-        // ViewportManagerで中心位置を計算
-        viewportManager.updateViewport(viewStart, newViewDuration);
-        const newViewStart = viewportManager.calculateCenteredViewStart(currentTime);
-        setViewStart(newViewStart);
-      }
+
+  /** 再生位置を基準に、表示時間を対数補間で滑らかに変える（ボタン・スライダー用）。 */
+  const animateZoomTo = (targetDuration: number, animate = true) => {
+    cancelZoomAnimation();
+    const { viewStart: start, viewDuration: fromDuration, currentTime: playhead } = viewStateRef.current;
+    // 再生位置が表示内ならその位置を保ち、表示外なら中央に寄せる
+    const ratio = playhead >= start && playhead <= start + fromDuration
+      ? (playhead - start) / Math.max(1, fromDuration)
+      : 0.5;
+    if (!animate) {
+      applyZoom(targetDuration, playhead, ratio);
+      return;
     }
+    const startedAt = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startedAt) / ZOOM_ANIMATION_MS);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const duration = fromDuration * Math.pow(targetDuration / fromDuration, eased);
+      applyZoom(duration, playhead, ratio);
+      zoomAnimationRef.current = t < 1 ? requestAnimationFrame(step) : null;
+    };
+    zoomAnimationRef.current = requestAnimationFrame(step);
   };
-  
+
+  const handleZoomIn = () => animateZoomTo(viewStateRef.current.viewDuration / ZOOM_BUTTON_FACTOR);
+  const handleZoomOut = () => animateZoomTo(viewStateRef.current.viewDuration * ZOOM_BUTTON_FACTOR);
+  const handleViewDurationChange = (duration: number) => animateZoomTo(duration, false);
+
+  /** Ctrl+ホイール／ピンチ操作。1フレームに届いた入力をまとめて、マウス位置を基準に拡大縮小する。 */
+  const handleWheelZoom = useCallback((factor: number, anchorTime: number, anchorRatio: number) => {
+    cancelZoomAnimation();
+    const pending = pendingWheelRef.current;
+    pendingWheelRef.current = pending
+      ? { factor: pending.factor * factor, anchorTime, anchorRatio }
+      : { factor, anchorTime, anchorRatio };
+    if (wheelFrameRef.current !== null) return;
+    wheelFrameRef.current = requestAnimationFrame(() => {
+      wheelFrameRef.current = null;
+      const next = pendingWheelRef.current;
+      pendingWheelRef.current = null;
+      if (next) applyZoom(viewStateRef.current.viewDuration * next.factor, next.anchorTime, next.anchorRatio);
+    });
+  }, [applyZoom]);
+
+  useEffect(() => () => {
+    cancelZoomAnimation();
+    if (wheelFrameRef.current !== null) cancelAnimationFrame(wheelFrameRef.current);
+  }, []);
+
   // スクロール条件判定ヘルパー関数（ViewportManager使用版）
   const canScroll = (currentTime: number): boolean => {
     const now = Date.now();
@@ -289,24 +320,23 @@ const NewLayout: React.FC<NewLayoutProps> = ({
             />
           </div>
           <div className="sidepanel-area">
-            {/* タブ切り替え実装：5タブ構成 */}
-            <SidebarTabs labels={['テンプレート', 'コンテンツ', 'プロジェクト', '設定', 'デバッグ']}>
+            {/* タブ切り替え実装：5タブ構成。
+                プロジェクトタブはショートカット（Ctrl/Cmd+O）と保存状態の監視、
+                書き出しタブは動画書き出しの進行状態と出力設定を持つため、タブ切替でアンマウントしない。 */}
+            <SidebarTabs
+              labels={['シーン', 'コンテンツ', 'プロジェクト', '書き出し', '設定']}
+              keepMountedIndexes={[2, 3]}
+            >
               {[
-                <TemplateTab
-                  key="template-tab"
-                  selectedTemplate={selectedTemplate}
-                  onTemplateChange={onTemplateChange}
-                  engine={engine}
-                  template={template}
-                />,
+                <SceneSettingsTab key="scene-settings-tab" engine={engine} />,
                 <ContentTab 
                   key="content-tab" 
                   engine={engine} 
                   onLyricsEditModeToggle={() => setLyricsEditMode(true)}
                 />,
                 <ProjectTab key="project-tab" engine={engine!} />,
-                <SettingsTab key="settings-tab" engine={engine} />,
-                <DebugTab key="debug-tab" engine={engine} debugInfo={debugInfo} timingDebugInfo={timingDebugInfo} />
+                <ExportTab key="export-tab" engine={engine!} />,
+                <SettingsTab key="settings-tab" engine={engine} debugInfo={debugInfo} timingDebugInfo={timingDebugInfo} />
               ]}
             </SidebarTabs>
           </div>
@@ -327,14 +357,15 @@ const NewLayout: React.FC<NewLayoutProps> = ({
               />
             </div>
             <ZoomControls
-              zoomLevel={zoomLevel}
               viewStart={viewStart}
               viewEnd={viewEnd}
               totalDuration={totalDuration}
-              maxZoomLevel={ZOOM_LEVELS.length - 1}
+              viewDuration={viewDuration}
+              minViewDuration={Math.min(MIN_VIEW_DURATION, totalDuration || MIN_VIEW_DURATION)}
+              maxViewDuration={maxViewDuration}
               onZoomIn={handleZoomIn}
               onZoomOut={handleZoomOut}
-              zoomLevels={ZOOM_LEVELS}
+              onViewDurationChange={handleViewDurationChange}
               engine={engine} // Undo/Redo機能のためにEngineインスタンスを渡す
             />
           </div>
@@ -347,7 +378,7 @@ const NewLayout: React.FC<NewLayoutProps> = ({
               template={template} // テンプレートを渡す
               viewStart={viewStart}
               viewDuration={viewDuration}
-              zoomLevel={zoomLevel}
+              onWheelZoom={handleWheelZoom}
               viewportManager={viewportManager} // ViewportManagerを追加
             />
           </div>

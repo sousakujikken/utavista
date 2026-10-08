@@ -192,25 +192,18 @@ const BackgroundTab: React.FC<BackgroundTabProps> = ({ engine }) => {
   };
   
   // 画像ファイル選択ハンドラ（エレクトロン専用）
-  const handleImageFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileChange = async (_event: React.ChangeEvent<HTMLInputElement>) => {
     if (engine) {
       try {
-        const result = await electronMediaManager.loadBackgroundVideo();
+        const result = await electronMediaManager.loadBackgroundImage();
         if (result) {
-          const { video } = result;
-          // VideoTextureとして設定
-          const texture = electronMediaManager.createPixiVideoTexture();
-          if (texture) {
-            engine.setBackgroundTexture(texture, fitMode);
-            setBackgroundImagePath(fileName || 'loaded');
-            
-            // プロジェクト状態を保存
-            if (engine.projectStateManager) {
-              const currentConfig = engine.getBackgroundConfig();
-              engine.projectStateManager.updateCurrentState({
-                backgroundConfig: currentConfig
-              });
-            }
+          await engine.setBackgroundImage(result.imageUrl, fitMode);
+          setBackgroundImagePath(result.imageUrl);
+
+          if (engine.projectStateManager) {
+            engine.projectStateManager.updateCurrentState({
+              backgroundConfig: engine.getBackgroundConfig()
+            });
           }
         }
       } catch (error) {

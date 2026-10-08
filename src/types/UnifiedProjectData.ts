@@ -1,5 +1,6 @@
 import { PhraseUnit, StageConfig, BackgroundConfig, AudioReference } from '../renderer/types/types';
 import { StandardParameters } from './StandardParameters';
+import type { GlobalPostEffectConfig } from '../renderer/effects/GlobalPostEffectManager';
 
 /**
  * 統一プロジェクトデータ構造（V2対応）
@@ -16,6 +17,7 @@ export interface NormalizedProjectData {
   templateAssignments: Record<string, string>;
   stageConfig: StageConfig;
   backgroundConfig: BackgroundConfig;
+  postEffectConfig?: GlobalPostEffectConfig;
   audioInfo: AudioReference;
   timestamp: number;
   // V2統一管理パラメータデータ（オプション）
@@ -38,6 +40,7 @@ export interface ProjectFileData {
   lyrics: PhraseUnit[];
   stageConfig?: StageConfig;
   backgroundConfig?: BackgroundConfig;
+  postEffectConfig?: GlobalPostEffectConfig;
   audioInfo?: AudioReference;
 }
 
@@ -64,6 +67,7 @@ export interface AutoSaveData {
     audioInfo: AudioReference;
     stageConfig: StageConfig;
     backgroundConfig?: BackgroundConfig;
+    postEffectConfig?: GlobalPostEffectConfig;
     selectedTemplate: string;
     templateParams: StandardParameters;
     backgroundVideoInfo?: {
@@ -99,6 +103,7 @@ export class ProjectDataNormalizer {
         type: 'color' as const,
         backgroundColor: '#000000'
       },
+      postEffectConfig: data.postEffectConfig,
       audioInfo: data.audioInfo || {
         fileName: '',
         duration: 10000,
@@ -147,6 +152,7 @@ export class ProjectDataNormalizer {
         type: 'color' as const,
         backgroundColor: '#000000'
       },
+      postEffectConfig: data.engineState.postEffectConfig,
       audioInfo: data.engineState.audioInfo,
       timestamp: data.timestamp,
       // V2データを別フィールドとして保持
@@ -171,6 +177,7 @@ export class ProjectDataNormalizer {
       lyrics: data.lyricsData,
       stageConfig: data.stageConfig,
       backgroundConfig: data.backgroundConfig,
+      postEffectConfig: data.postEffectConfig,
       audioInfo: data.audioInfo
     };
   }
@@ -195,6 +202,7 @@ export class ProjectDataNormalizer {
         audioInfo: data.audioInfo,
         stageConfig: data.stageConfig,
         backgroundConfig: data.backgroundConfig,
+        postEffectConfig: data.postEffectConfig,
         selectedTemplate: data.templateId,
         templateParams: data.templateParams
       }
@@ -224,9 +232,9 @@ export class ProjectDataNormalizer {
       globalParams: data.globalParams || {},
       objectParams: data.objectParams || {},
       individualSettingsEnabled: data.individualSettingsEnabled || [],
-      templateId: data.templateId || 'fadeslidetext',
+      templateId: 'kineticscenetemplate',
       templateParams: data.templateParams || {},
-      templateAssignments: data.templateAssignments || {},
+      templateAssignments: {},
       stageConfig: data.stageConfig || {
         aspectRatio: '16:9' as const,
         orientation: 'landscape' as const
@@ -235,6 +243,7 @@ export class ProjectDataNormalizer {
         type: 'color' as const,
         backgroundColor: '#000000'
       },
+      postEffectConfig: data.postEffectConfig,
       audioInfo: data.audioInfo || {
         fileName: '',
         duration: 10000,

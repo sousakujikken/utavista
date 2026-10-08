@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { ipcMain } from 'electron';
 import type { FontInfo } from '../shared/types';
+import { readFontMetadata } from './fontMetadata';
 
 class FontManager {
   private systemFonts: FontInfo[] = [];
@@ -124,7 +125,7 @@ class FontManager {
             const fontInfos = this.parseTTCFile(file.name, fullPath);
             this.systemFonts.push(...fontInfos);
           } else {
-            const fontInfo = this.parseFontFile(file.name, fullPath);
+            const fontInfo = await this.readFontInfo(file.name, fullPath);
             if (fontInfo) {
               this.systemFonts.push(fontInfo);
             }
@@ -143,12 +144,49 @@ class FontManager {
     return fontExtensions.includes(ext);
   }
 
+  /**
+   * フォントファイル内部の name / OS/2 テーブルからファミリー名とウェイトを読む。
+   * ファイル名からの推測ではウェイト別の静的フォント（Thin〜Black）が別ファミリーや
+   * 重複扱いになるため、読めた場合はこちらを使う。fullName は既存プロジェクトとの
+   * 互換のためファイル名のまま残す。
+   */
+  private async readFontInfo(fileName: string, fullPath: string): Promise<FontInfo | null> {
+    const metadata = await readFontMetadata(fullPath).catch(() => null);
+    if (!metadata) return this.parseFontFile(fileName, fullPath);
+    const baseName = path.basename(fileName, path.extname(fileName));
+    if (metadata.variable) {
+      // 可変フォントは既定インスタンス（Thin等）ではなく、太さ可変のファミリーとして扱う。
+      return {
+        family: metadata.family,
+        fullName: baseName,
+        style: metadata.italic ? 'Italic' : 'Regular',
+        weight: '400',
+        path: fullPath,
+        variable: true
+      };
+    }
+    return {
+      family: metadata.family,
+      fullName: baseName,
+      style: metadata.subfamily,
+      weight: String(metadata.weight),
+      path: fullPath,
+      variable: false
+    };
+  }
+
   private parseFontFile(fileName: string, fullPath: string): FontInfo | null {
     try {
       const baseName = path.basename(fileName, path.extname(fileName));
+      // Google Fonts等の可変フォント名に付く技術的な接尾辞は
+      // UI上のファミリー名にもCSS aliasにも含めない。
+      const nameWithoutVariableSuffix = baseName.replace(
+        /[-_\s]*VariableFont[-_\s]*(?:[A-Za-z]+(?:[,\s_-]+[A-Za-z]+)*)?$/i,
+        ''
+      ).replace(/[-_\s]*\[[^\]]*wght[^\]]*\]$/i, '');
       
       // Extract font family from filename
-      let family = baseName;
+      let family = nameWithoutVariableSuffix || baseName;
       let style = 'Regular';
       let weight = 'normal';
 
@@ -189,7 +227,8 @@ class FontManager {
         fullName: baseName,
         style,
         weight,
-        path: fullPath
+        path: fullPath,
+        variable: /variablefont|(?:^|[_-])wght(?:[_,-]|$)|\[.*wght.*\]/i.test(baseName)
       };
     } catch (error) {
       console.debug(`Error parsing font file ${fileName}:`, error);
@@ -258,8 +297,9 @@ class FontManager {
       const variantsSeen = new Set<string>();
       
       groupFonts.forEach(font => {
-        // weight と style の組み合わせでユニークチェック
-        const variantKey = `${font.weight}_${font.style}`;
+        // weight・style・可変かどうかの組み合わせでユニークチェック。
+        // 可変フォントと同じ名前の静的フォント（Regular 400 など）を取りこぼさない。
+        const variantKey = `${font.variable ? 'var' : 'static'}_${font.weight}_${font.style}`;
         if (!variantsSeen.has(variantKey)) {
           variantsSeen.add(variantKey);
           uniqueFonts.push(font);

@@ -226,6 +226,7 @@ export class CoreSynchronizationEngine {
       const style = new PIXI.TextStyle({
         fontSize: instance.params.fontSize as number || 48,
         fontFamily: instance.params.fontFamily as string || 'Arial',
+        fontWeight: instance.params.fontWeight as string || '700',
         fill: instance.params.fill || '#ffffff'
       });
       

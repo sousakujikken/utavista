@@ -1,4 +1,4 @@
-import { PhraseUnit } from '../types/types';
+import { BackgroundConfig, PhraseUnit, StageConfig } from '../types/types';
 import { ProjectState } from '../engine/ProjectStateManager';
 import { unifiedFileManager } from './UnifiedFileManager';
 import { Engine } from '../engine/Engine';
@@ -7,6 +7,16 @@ import { calculateCharacterIndices } from '../utils/characterIndexCalculator';
 import { StandardParameters } from '../types/StandardParameters';
 import { ParameterValidator } from '../../utils/ParameterValidator';
 import { ParameterProcessor } from '../utils/ParameterProcessor';
+import { setProjectSaveSnapshot } from './ProjectSaveStatus';
+import { markProjectClean } from './ProjectDirtyTracker';
+import { FontService } from './FontService';
+import {
+  DEFAULT_POST_EFFECT_CONFIG,
+  type GlobalPostEffectConfig
+} from '../effects/GlobalPostEffectManager';
+
+/** 読み込み後、遅延して行われる歌詞・個別設定の反映が終わるまでの待ち時間。 */
+export const PROJECT_LOAD_SETTLE_MS = 1500;
 
 // プロジェクトファイルのメタデータ
 export interface ProjectMetadata {
@@ -19,6 +29,7 @@ export interface ProjectMetadata {
 export interface AudioReference {
   fileName: string;
   duration: number;
+  filePath?: string;
 }
 
 // プロジェクトファイルデータ構造
@@ -31,6 +42,9 @@ export interface ProjectFileData {
   globalParams: Record<string, any>;
   objectParams: Record<string, Record<string, any>>;
   backgroundColor?: string;
+  backgroundConfig?: BackgroundConfig;
+  stageConfig?: StageConfig;
+  postEffectConfig?: GlobalPostEffectConfig;
   // 個別設定情報
   individualSettingsEnabled?: string[];
   // 後方互換性のため（読み込み時のみ使用）
@@ -82,7 +96,46 @@ export class ProjectFileManager {
     if (!validation.isValid) {
       console.warn('Parameter normalization warnings:', validation.errors);
     }
-    return validation.sanitized;
+    // 固定KineticSceneテンプレートの動的項目は旧レジストリ外でも保存対象にする。
+    return normalizedParams as StandardParameters;
+  }
+
+  /**
+   * 保存されたフォント名を現在のPC上のファミリー名へ揃え、描画前に登録する。
+   */
+  private async prepareProjectFonts(projectData: ProjectFileData): Promise<void> {
+    const parameterData = (projectData as any).parameterData;
+    const parameterSets: Array<Record<string, any>> = [];
+
+    if (projectData.globalParams) parameterSets.push(projectData.globalParams);
+    if (parameterData?.globalDefaults) parameterSets.push(parameterData.globalDefaults);
+    Object.values(projectData.objectParams || {}).forEach(params => parameterSets.push(params));
+    Object.values(parameterData?.phrases || {}).forEach((phrase: any) => {
+      if (phrase?.parameterDiff) parameterSets.push(phrase.parameterDiff);
+    });
+
+    const fontSelections = new Map<string, { family: string; weight?: string }>();
+    parameterSets.forEach(params => {
+      if (typeof params.fontFamily !== 'string' || !params.fontFamily.trim()) return;
+      const normalized = FontService.normalizeFontFamily(params.fontFamily);
+      params.fontFamily = normalized;
+      const weight = typeof params.fontWeight === 'string' ? params.fontWeight : undefined;
+      fontSelections.set(`${normalized}|${weight || ''}`, { family: normalized, weight });
+    });
+
+    const results = await Promise.allSettled(
+      Array.from(fontSelections.values(), selection =>
+        FontService.ensureFontLoaded(selection.family, selection.weight)
+      )
+    );
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.warn(
+          `[ProjectFileManager] フォント ${Array.from(fontSelections.values())[index].family} の復元に失敗しました:`,
+          result.reason
+        );
+      }
+    });
   }
   
   /**
@@ -96,12 +149,13 @@ export class ProjectFileManager {
     if (!validation.isValid) {
       throw new Error(`無効なプロジェクトファイル: ${validation.errors.join(', ')}`);
     }
+    await this.prepareProjectFonts(projectData);
     
     // 文字インデックスを計算
     const lyricsWithIndices = calculateCharacterIndices(projectData.lyricsData);
     
     // グローバルテンプレートIDを取得（後方互換性対応）
-    const globalTemplateId = projectData.globalTemplateId || projectData.defaultTemplateId || 'FadeSlideText';
+    const globalTemplateId = 'kineticscenetemplate';
     
     // プロジェクト状態を復元
     const state: Partial<ProjectState> = {
@@ -111,6 +165,8 @@ export class ProjectFileManager {
       templateAssignments: {},  // 新しい形式ではobjectParamsにtemplateIdが含まれる
       objectParams: projectData.objectParams,
       backgroundColor: projectData.backgroundColor,
+      backgroundConfig: projectData.backgroundConfig,
+      stageConfig: projectData.stageConfig,
       audioFileName: projectData.audio.fileName,
       audioFileDuration: projectData.audio.duration,
       individualSettingsEnabled: projectData.individualSettingsEnabled || []
@@ -144,6 +200,14 @@ export class ProjectFileManager {
     if (projectData.backgroundColor) {
       this.engine.setBackgroundColor(projectData.backgroundColor);
     }
+    if (projectData.stageConfig) {
+      this.engine.resizeStage(projectData.stageConfig.aspectRatio, projectData.stageConfig.orientation);
+    }
+    this.engine.updatePostEffectConfig(
+      projectData.postEffectConfig || DEFAULT_POST_EFFECT_CONFIG,
+      false
+    );
+    await this.restoreProjectMedia(projectData);
     
     // 音楽ファイル要求イベントを発行
     DebugEventBus.emit('request-audio-file', {
@@ -181,26 +245,31 @@ export class ProjectFileManager {
       fileName: projectData.metadata.projectName,
       globalTemplateId
     });
+    setProjectSaveSnapshot({ savedAt: projectData.metadata.modifiedAt || new Date().toISOString() });
+    // 歌詞の反映（150ms後）などが終わってから、読み込んだ内容を未保存判定の基準にする。
+    markProjectClean(() => this.getContentFingerprint(), PROJECT_LOAD_SETTLE_MS);
   }
 
   /**
    * プロジェクトをファイルに保存（エレクトロン専用）
    * @param fileName ファイル名（拡張子なし）
    */
-  async saveProject(fileName: string): Promise<string> {
+  async saveProject(fileName: string = 'project', saveAs: boolean = false): Promise<string> {
     try {
       // プロジェクトデータを構築
       const projectData = this.buildProjectData(fileName);
       
     
       // エレクトロンのファイル保存APIを使用
-      const filePath = await unifiedFileManager.saveProject(projectData);
+      const filePath = await unifiedFileManager.saveProject(projectData as any, { saveAs });
       
       // 保存成功時に自動保存データをクリア
       await this.engine.clearAutoSave();
       
       // デバッグイベント発行
       DebugEventBus.emit('project-saved', { fileName: filePath });
+      setProjectSaveSnapshot({ savedAt: new Date().toISOString(), filePath });
+      markProjectClean(() => this.getContentFingerprint());
       
       return filePath;
     } catch (error) {
@@ -222,6 +291,7 @@ export class ProjectFileManager {
       if (!validation.isValid) {
         throw new Error(`無効なプロジェクトファイル: ${validation.errors.join(', ')}`);
       }
+      await this.prepareProjectFonts(projectData);
       
       // 文字インデックスを計算
       const lyricsWithIndices = calculateCharacterIndices(projectData.lyricsData);
@@ -230,7 +300,7 @@ export class ProjectFileManager {
       this.cleanupLegacyParams(lyricsWithIndices);
       
       // グローバルテンプレートIDを取得（後方互換性対応）
-      const globalTemplateId = projectData.globalTemplateId || projectData.defaultTemplateId || 'FadeSlideText';
+      const globalTemplateId = 'kineticscenetemplate';
       
       // プロジェクト状態を復元
       const state: Partial<ProjectState> = {
@@ -240,6 +310,8 @@ export class ProjectFileManager {
         templateAssignments: {},  // 新しい形式ではobjectParamsにtemplateIdが含まれる
         objectParams: projectData.objectParams,
         backgroundColor: projectData.backgroundColor,
+        backgroundConfig: projectData.backgroundConfig,
+        stageConfig: projectData.stageConfig,
         audioFileName: projectData.audio.fileName,
         audioFileDuration: projectData.audio.duration,
         individualSettingsEnabled: projectData.individualSettingsEnabled || []
@@ -285,6 +357,14 @@ export class ProjectFileManager {
       if (projectData.backgroundColor) {
         this.engine.setBackgroundColor(projectData.backgroundColor);
       }
+      if (projectData.stageConfig) {
+        this.engine.resizeStage(projectData.stageConfig.aspectRatio, projectData.stageConfig.orientation);
+      }
+      this.engine.updatePostEffectConfig(
+        projectData.postEffectConfig || DEFAULT_POST_EFFECT_CONFIG,
+        false
+      );
+      await this.restoreProjectMedia(projectData);
       
       // 音楽ファイルの再読み込みを促す
       if (projectData.audio.fileName) {
@@ -303,6 +383,8 @@ export class ProjectFileManager {
         globalTemplateId: globalTemplateId,
         globalParams: projectData.globalParams
       });
+      setProjectSaveSnapshot({ savedAt: projectData.metadata.modifiedAt || new Date().toISOString() });
+      markProjectClean(() => this.getContentFingerprint(), PROJECT_LOAD_SETTLE_MS);
       
       // UI更新のためのイベントを発火
       window.dispatchEvent(new CustomEvent('template-loaded', {
@@ -416,6 +498,15 @@ export class ProjectFileManager {
   /**
    * プロジェクトデータを構築
    */
+  /**
+   * 保存されるプロジェクト内容の比較用文字列。作成・更新日時などのメタデータは含めない。
+   * 「今保存したらファイルの中身が変わるか」で未保存の変更を判定するために使う。
+   */
+  getContentFingerprint(): string {
+    const { metadata: _metadata, ...contents } = this.buildProjectData('project');
+    return JSON.stringify(contents);
+  }
+
   private buildProjectData(projectName: string): ProjectFileData {
     const state = this.engine.getStateManager().exportFullState();
     
@@ -489,13 +580,17 @@ export class ProjectFileManager {
       },
       audio: {
         fileName: state.audioFileName || '',
-        duration: state.audioFileDuration || 0
+        duration: state.audioFileDuration || 0,
+        filePath: this.engine.getAudioFilePath() || undefined
       },
       lyricsData: engineLyrics || state.lyricsData || [], // Engineから直接取得を優先
       globalTemplateId: globalTemplateId,
       globalParams: this.normalizeParameters(this.engine.getParameterManager().getGlobalDefaults()),
       objectParams: enhancedObjectParams,
       backgroundColor: state.backgroundColor,
+      backgroundConfig: this.engine.getBackgroundConfig(),
+      stageConfig: this.engine.getStageConfig(),
+      postEffectConfig: this.engine.getPostEffectConfig(),
       individualSettingsEnabled: this.engine.getParameterManager().getIndividualSettingsEnabled() // V2統一管理で個別設定リストを取得
     };
     
@@ -503,6 +598,58 @@ export class ProjectFileManager {
     (projectData as any).parameterData = parameterData;
     
     return projectData;
+  }
+
+  private async restoreProjectMedia(projectData: ProjectFileData): Promise<void> {
+    const background = projectData.backgroundConfig;
+    if (background?.type === 'image' && background.imageFilePath) {
+      try {
+        await this.engine.setBackgroundImage(background.imageFilePath, background.fitMode || 'cover');
+        if (background.opacity !== undefined) this.engine.updateBackgroundConfig({ opacity: background.opacity });
+      } catch (error) {
+        console.warn('背景画像の復元に失敗しました:', error);
+      }
+    } else if (background?.type === 'video' && background.videoFilePath) {
+      try {
+        const { electronMediaManager } = await import('./ElectronMediaManager');
+        let rawPath = background.videoFilePath;
+        if (rawPath.startsWith('file://')) {
+          try {
+            rawPath = decodeURIComponent(new URL(rawPath).pathname).replace(/^\/([A-Za-z]:)/, '$1');
+          } catch {
+            rawPath = decodeURI(rawPath.replace(/^file:\/\/\/?/, '')).replace(/^\/([A-Za-z]:)/, '$1');
+          }
+        }
+        const restored = await electronMediaManager.restoreBackgroundVideo(
+          rawPath.split(/[/\\]/).pop() || 'background-video',
+          rawPath
+        );
+        if (restored) {
+          this.engine.setBackgroundVideoElement(
+            restored.video,
+            background.fitMode || 'cover',
+            restored.fileName,
+            background.videoLoop || false
+          );
+          if (background.opacity !== undefined) this.engine.updateBackgroundConfig({ opacity: background.opacity });
+        }
+      } catch (error) {
+        console.warn('背景動画の復元に失敗しました:', error);
+      }
+    }
+
+    if (projectData.audio.fileName) {
+      try {
+        const { electronMediaManager } = await import('./ElectronMediaManager');
+        const restored = await electronMediaManager.restoreAudioFile(
+          projectData.audio.fileName,
+          projectData.audio.filePath
+        );
+        if (restored) this.engine.loadAudioElement(restored.audio, restored.fileName);
+      } catch (error) {
+        console.warn('音楽ファイルの復元に失敗しました:', error);
+      }
+    }
   }
   
   /**
@@ -560,7 +707,7 @@ export class ProjectFileManager {
     // テンプレートIDのデフォルト設定
     if (!data.globalTemplateId && !data.defaultTemplateId) {
       console.warn('ProjectFileManager: テンプレートIDがありません。デフォルト値を設定します');
-      data.globalTemplateId = 'fadeslidetext';
+      data.globalTemplateId = 'kineticscenetemplate';
     }
     
     // 音楽ファイル情報のデフォルト設定

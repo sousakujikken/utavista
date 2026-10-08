@@ -18,6 +18,19 @@ export class ElectronMediaManager {
   async loadBackgroundAudio(): Promise<{ audio: HTMLAudioElement; fileName: string } | null> {
     return this.loadMediaFile('audio');
   }
+
+  async loadBackgroundImage(): Promise<{ imageUrl: string; fileName: string; filePath: string } | null> {
+    const mediaInfo = await unifiedFileManager.selectImageFile();
+    const normalizedPath = mediaInfo.path.replace(/\\/g, '/');
+    const imageUrl = normalizedPath.startsWith('file://')
+      ? encodeURI(normalizedPath)
+      : `file:///${encodeURI(normalizedPath).replace(/^\/+/, '')}`;
+    return {
+      imageUrl,
+      fileName: mediaInfo.name,
+      filePath: mediaInfo.path
+    };
+  }
   
   getBackgroundVideo(): HTMLVideoElement | null {
     return this.backgroundVideo;
@@ -373,8 +386,10 @@ export class ElectronMediaManager {
   }
 
   // 最近使用したファイルを取得
-  async getRecentFiles(type: 'audio' | 'backgroundVideo'): Promise<Array<{fileName: string, filePath: string, timestamp: number}>> {
+  async getRecentFiles(type: 'audio' | 'backgroundVideo' | 'image'): Promise<Array<{fileName: string, filePath: string, timestamp: number}>> {
     try {
+      // 画像履歴はまだ永続化していない。選択自体はネイティブダイアログから行える。
+      if (type === 'image') return [];
       const electronAPI = (window as any).electronAPI;
       if (!electronAPI) {
         console.error('ElectronMediaManager: electronAPI not available');

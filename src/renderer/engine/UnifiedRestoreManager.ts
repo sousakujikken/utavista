@@ -5,6 +5,8 @@ import { TemplateManager } from './TemplateManager';
 import { InstanceManager } from './InstanceManager';
 import { ParameterProcessor } from '../utils/ParameterProcessor';
 import { IAnimationTemplate } from '../types/types';
+import { FontService } from '../services/FontService';
+import { DEFAULT_POST_EFFECT_CONFIG } from '../effects/GlobalPostEffectManager';
 import { 
   NormalizedProjectData, 
   ProjectFileData, 
@@ -64,11 +66,20 @@ export class UnifiedRestoreManager {
         normalizedData = ProjectDataNormalizer.sanitizeNormalizedData(normalizedData);
       }
 
+      // 自動保存からの復元でも、文字インスタンス生成前に実フォントを登録する。
+      await this.prepareProjectFonts(normalizedData);
+
       // 2. ステージ設定の復元
       await this.restoreStageConfig(normalizedData.stageConfig);
 
       // 3. 背景設定の復元
       await this.restoreBackgroundConfig(normalizedData.backgroundConfig);
+
+      // 全シーン共通Post FXはプロジェクト単位で復元する。
+      this.engine.updatePostEffectConfig(
+        normalizedData.postEffectConfig || DEFAULT_POST_EFFECT_CONFIG,
+        false
+      );
 
       // 4. 音声情報の復元
       await this.restoreAudioInfo(normalizedData.audioInfo);
@@ -192,6 +203,42 @@ export class UnifiedRestoreManager {
       console.error('UnifiedRestoreManager: 統一復元処理エラー:', error);
       return false;
     }
+  }
+
+  private async prepareProjectFonts(normalizedData: NormalizedProjectData): Promise<void> {
+    const parameterSets: Array<Record<string, any>> = [
+      normalizedData.globalParams,
+      normalizedData.templateParams,
+      ...Object.values(normalizedData.objectParams || {})
+    ];
+    const parameterData = normalizedData.parameterData;
+    if (parameterData?.globalDefaults) parameterSets.push(parameterData.globalDefaults);
+    Object.values(parameterData?.phrases || {}).forEach((phrase: any) => {
+      if (phrase?.parameterDiff) parameterSets.push(phrase.parameterDiff);
+    });
+
+    const fontSelections = new Map<string, { family: string; weight?: string }>();
+    parameterSets.forEach(params => {
+      if (!params || typeof params.fontFamily !== 'string' || !params.fontFamily.trim()) return;
+      const normalized = FontService.normalizeFontFamily(params.fontFamily);
+      params.fontFamily = normalized;
+      const weight = typeof params.fontWeight === 'string' ? params.fontWeight : undefined;
+      fontSelections.set(`${normalized}|${weight || ''}`, { family: normalized, weight });
+    });
+
+    const results = await Promise.allSettled(
+      Array.from(fontSelections.values(), selection =>
+        FontService.ensureFontLoaded(selection.family, selection.weight)
+      )
+    );
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.warn(
+          `[UnifiedRestoreManager] フォント ${Array.from(fontSelections.values())[index].family} の復元に失敗しました:`,
+          result.reason
+        );
+      }
+    });
   }
 
   /**

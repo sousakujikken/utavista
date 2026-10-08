@@ -1,12 +1,15 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef, useMemo } from 'react';
 import HierarchicalMarker from '../timeline/HierarchicalMarker';
 import WaveformPanel from './WaveformPanel';
+import BeatMarkers from '../timeline/BeatMarkers';
+import type { BeatMarker } from '../../services/AudioAnalyzer';
 import { PhraseUnit, WordUnit, CharUnit, IAnimationTemplate } from '../../types/types';
 import { MarkerLevel, SelectionState } from '../timeline/types/HierarchicalMarkerTypes';
 import { getMarkerLevel, getParentObjectId, MIN_DURATIONS, calculateBlockConstraints } from '../timeline/MarkerConstraints';
 import { getCurrentTimeMarkerStyle, getTimeIndicatorStyle, getDragSelectionStyle } from '../timeline/MarkerStyles';
 import Engine from '../../engine/Engine';
 import { ViewportManager } from '../../utils/ViewportManager';
+import { setObjectSelectionSnapshot } from '../../services/ObjectSelectionState';
 import '../../styles/components.css';
 
 // ズームレベルの定義（ピクセル密度: ms per pixel）
@@ -20,6 +23,8 @@ interface TimelinePanelProps {
   viewStart?: number;
   viewDuration?: number;
   zoomLevel?: number;
+  /** Ctrl+ホイール／ピンチで拡大縮小する。factor>1で縮小。anchorTime が表示幅の anchorRatio の位置に留まる。 */
+  onWheelZoom?: (factor: number, anchorTime: number, anchorRatio: number) => void;
   viewportManager?: ViewportManager;
 }
 
@@ -31,13 +36,27 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
   viewStart: externalViewStart,
   viewDuration: externalViewDuration,
   viewportManager,
-  zoomLevel: externalZoomLevel
+  zoomLevel: externalZoomLevel,
+  onWheelZoom
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const timelineAreaRef = useRef<HTMLDivElement>(null);
   const [lyrics, setLyrics] = useState<PhraseUnit[]>([]);
   const [width, setWidth] = useState(800);
   const [localDuration, setLocalDuration] = useState(totalDuration || 10000);
+  const [beats, setBeats] = useState<BeatMarker[]>(() => engine?.getBeatMarkers() || []);
+
+  useEffect(() => {
+    setBeats(engine?.getBeatMarkers() || []);
+
+    const handleBeatMarkersUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ beats: BeatMarker[] }>).detail;
+      setBeats(detail?.beats || []);
+    };
+
+    window.addEventListener('beat-markers-updated', handleBeatMarkersUpdated);
+    return () => window.removeEventListener('beat-markers-updated', handleBeatMarkersUpdated);
+  }, [engine]);
   
   // 選択状態管理
   const [selectionState, setSelectionState] = useState<SelectionState>({
@@ -106,41 +125,50 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
   const timelineWidth = Math.max(width, duration / msPerPixel);
   
   // viewStartが変更されたときに実際のスクロール位置を更新
-  useEffect(() => {
+  // 描画と同時にスクロール位置を合わせる（遅れると、連続したホイール操作で基準位置がずれる）
+  const previousMsPerPixelRef = useRef(msPerPixel);
+  useLayoutEffect(() => {
     if (timelineAreaRef.current && externalViewStart !== undefined && msPerPixel > 0) {
       // viewStartをピクセル位置に変換
       const scrollPosition = externalViewStart / msPerPixel;
-      
-      // スクロール位置を設定（スムーズスクロール）
+      // 拡大縮小で縮尺が変わったときは、基準位置がずれないよう即座に合わせる。それ以外はスムーズスクロール。
+      const zoomChanged = previousMsPerPixelRef.current !== msPerPixel;
+      previousMsPerPixelRef.current = msPerPixel;
+
       if (Math.abs(timelineAreaRef.current.scrollLeft - scrollPosition) > 1) {
         timelineAreaRef.current.scrollTo({
           left: scrollPosition,
-          behavior: 'smooth'
+          behavior: zoomChanged ? 'auto' : 'smooth'
         });
       }
     }
   }, [externalViewStart, msPerPixel]);
 
-  /**
-   * Undo状態保存
-   */
-  const saveUndoState = (operationType: string, objectId?: string) => {
-    if (!engine) return;
-    
-    try {
-      engine.projectStateManager.updateCurrentState({
-        lyricsData: JSON.parse(JSON.stringify(lyrics)),
-        currentTime: currentTime,
-        templateAssignments: engine.templateManager.exportAssignments(),
-        globalParams: engine.parameterManager.getGlobalDefaults(),
-        objectParams: engine.parameterManager.exportCompressed().phrases || {},
-        defaultTemplateId: engine.templateManager.getDefaultTemplateId()
-      });
-      
-      engine.projectStateManager.saveBeforeLyricsChange(operationType, objectId);
-    } catch (error) {
-      console.error('TimelinePanel: Undo状態保存エラー:', error);
-    }
+  // Ctrl+ホイール（トラックパッドのピンチ操作を含む）で、マウス位置を基準に連続的に拡大縮小する。
+  // ブラウザ既定のページ拡大を止めるため、passive: false で登録する。
+  const wheelZoomRef = useRef({ onWheelZoom, msPerPixel, width });
+  wheelZoomRef.current = { onWheelZoom, msPerPixel, width };
+  useEffect(() => {
+    const area = timelineAreaRef.current;
+    if (!area) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const { onWheelZoom: zoom, msPerPixel: scale, width: viewWidth } = wheelZoomRef.current;
+      if (!zoom || !(scale > 0) || !(viewWidth > 0)) return;
+      event.preventDefault();
+      const rect = area.getBoundingClientRect();
+      const x = Math.min(Math.max(0, event.clientX - rect.left), viewWidth);
+      const anchorTime = (area.scrollLeft + x) * scale;
+      // 行単位・ページ単位のスクロール量をピクセル相当にそろえる
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewWidth : 1);
+      zoom(Math.exp(delta * 0.0015), anchorTime, x / viewWidth);
+    };
+    area.addEventListener('wheel', handleWheel, { passive: false });
+    return () => area.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  const commitTimelineEdit = () => {
+    engine?.saveUndoState('タイムライン編集');
   };
 
   /**
@@ -190,6 +218,10 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
       selectedIds: newSelectedIds,
       selectedLevel: newSelectedLevel,
       lastSelectedId: newSelectedIds.length > 0 ? newSelectedIds[newSelectedIds.length - 1] : null
+    });
+    setObjectSelectionSnapshot({
+      objectIds: newSelectedIds,
+      objectType: newSelectedLevel || ''
     });
 
     // パラメータ取得（単一選択時のみ）
@@ -930,9 +962,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
   /**
    * ドラッグ開始ハンドラー（改良版）
    */
-  const handleDragStart = (unitId: string, operationType: string) => {
-    saveUndoState(operationType, unitId);
-    
+  const handleDragStart = (_unitId: string, _operationType: string) => {
     // 新しいドラッグ状態をリセット
     const dragState = multiDragStateRef.current;
     dragState.isActive = false;
@@ -956,18 +986,20 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
 
   // リサイズ監視
   useEffect(() => {
-    if (!containerRef.current) return;
+    // 縮尺（ms/px）は、左側のラベル列を除いたスクロール領域の幅で計算する
+    const area = timelineAreaRef.current;
+    if (!area) return;
     
     const updateWidth = () => {
-      if (containerRef.current) {
-        setWidth(containerRef.current.clientWidth);
+      if (area.clientWidth > 0) {
+        setWidth(area.clientWidth);
       }
     };
     
     updateWidth();
     
     const observer = new ResizeObserver(updateWidth);
-    observer.observe(containerRef.current);
+    observer.observe(area);
     
     return () => observer.disconnect();
   }, []);
@@ -1399,6 +1431,14 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
           }}
         >
           <div className="timeline-content" style={{ width: `${timelineWidth}px`, position: 'relative' }}>
+          <BeatMarkers
+            beats={beats}
+            duration={duration}
+            timelineWidth={timelineWidth}
+            msPerPixel={msPerPixel}
+            viewStart={externalViewStart ?? 0}
+            currentTime={currentTime}
+          />
           {/* 波形表示 */}
           <div className="waveform-wrapper">
             <WaveformPanel 
@@ -1463,6 +1503,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                   onMultiUpdate={handleMultiUpdate}
                   onSelectionChange={handleSelectionChange}
                   onDragStart={handleDragStart}
+                  onDragEnd={commitTimelineEdit}
                 />
               );
             })}
@@ -1520,6 +1561,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     onMultiUpdate={handleMultiUpdate}
                     onSelectionChange={handleSelectionChange}
                     onDragStart={handleDragStart}
+                    onDragEnd={commitTimelineEdit}
                   />
                 );
               })
@@ -1580,6 +1622,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
                       onMultiUpdate={handleMultiUpdate}
                       onSelectionChange={handleSelectionChange}
                       onDragStart={handleDragStart}
+                      onDragEnd={commitTimelineEdit}
                     />
                   );
                 })

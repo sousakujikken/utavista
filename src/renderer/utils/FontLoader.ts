@@ -10,6 +10,7 @@ import { persistenceService } from '../services/PersistenceService';
 
 export class FontLoader {
   private static loadedFonts: Set<string> = new Set();
+  private static loadedFamilies: Set<string> = new Set();
   private static failedFonts: Set<string> = new Set();
   private static styleElement: HTMLStyleElement | null = null;
   private static loadingPromises: Map<string, Promise<boolean>> = new Map();
@@ -48,8 +49,7 @@ export class FontLoader {
     }
 
     // 問題のあるフォントをスキップ（デフォルトブラックリストと動的ブラックリストの両方をチェック）
-    if (this.PROBLEMATIC_FONTS.some(prob => fontInfo.family.includes(prob)) || 
-        this.dynamicBlacklist.has(fontInfo.family)) {
+    if (this.PROBLEMATIC_FONTS.some(prob => fontInfo.family.includes(prob))) {
       return false;
     }
 
@@ -74,59 +74,37 @@ export class FontLoader {
     // 読み込み処理をPromiseでラップして、重複を防ぐ
     const loadPromise = (async () => {
       try {
-        // Electronのfile://プロトコルでフォントファイルにアクセス
-        const fontUrl = `file://${fontInfo.path}`;
-        
-        // CSS @font-face ルールを作成
-        const fontFace = `
-          @font-face {
-            font-family: "${fontInfo.family}";
-            src: url("${fontUrl}") format("${this.getFontFormat(fontInfo.path)}");
-            font-weight: ${fontInfo.weight || 'normal'};
-            font-style: ${fontInfo.style === 'Italic' ? 'italic' : 'normal'};
-          }
-        `;
+        const fontUrl = this.toFileUrl(fontInfo.path);
+        const weight = this.getFontWeightDescriptor(fontInfo);
+        const style = fontInfo.style.toLowerCase().includes('italic') ? 'italic' : 'normal';
+        const source = `url(${JSON.stringify(fontUrl)}) format("${this.getFontFormat(fontInfo.path)}")`;
 
-        // スタイルシートに追加
-        if (this.styleElement) {
-          this.styleElement.textContent += fontFace;
+        if (!('fonts' in document) || typeof FontFace === 'undefined') {
+          throw new Error('CSS Font Loading API が利用できません');
         }
 
-        // CSS Font Loading APIを使用してフォントの読み込みを確認
-        // weight と style を含めて正確に指定
-        if ('fonts' in document) {
-          const weight = fontInfo.weight || 'normal';
-          const style = fontInfo.style === 'Italic' ? 'italic' : 'normal';
-          const fontSpec = `${style} ${weight} 12px "${fontInfo.family}"`;
-          
-          try {
-            await (document as any).fonts.load(fontSpec);
-          } catch (loadError) {
-            // Font Loading API のエラーを詳細に記録
-            console.error(`[FontLoader] Font Loading API エラー: ${fontInfo.family} (${weight} ${style})`, loadError);
-            console.error(`[FontLoader] フォント仕様: ${fontSpec}`);
-            console.error(`[FontLoader] フォントURL: ${fontUrl}`);
-            // この時点では致命的エラーとして扱わない（フォールバック機能があるため）
-          }
-        } else {
-          console.warn('[FontLoader] CSS Font Loading API が利用できません');
+        // FontFaceを直接登録し、ロード完了後にだけPIXIへ利用可能と通知する。
+        // CSS文字列へのWindowsパス埋め込みではバックスラッシュがエスケープ扱いになる。
+        const fontFace = new FontFace(fontInfo.family, source, { weight, style });
+        const loadedFace = await fontFace.load();
+        document.fonts.add(loadedFace);
+
+        const fontSpecWeight = weight.includes(' ') ? '400' : weight;
+        const fontSpec = `${style} ${fontSpecWeight} 12px ${JSON.stringify(fontInfo.family)}`;
+        await document.fonts.load(fontSpec);
+        if (!document.fonts.check(fontSpec)) {
+          throw new Error(`登録後のフォント確認に失敗しました: ${fontSpec}`);
         }
 
         this.loadedFonts.add(fontKey);
+        this.loadedFamilies.add(fontInfo.family);
         return true;
 
       } catch (error) {
         // 失敗したフォントをキャッシュ
         this.failedFonts.add(fontKey);
-        // 動的ブラックリストに追加
-        this.dynamicBlacklist.add(fontInfo.family);
-        // エラーログレベルを上げて、詳細情報を含める
         console.error(`[FontLoader] フォント読み込みエラー: ${fontInfo.family} (${fontInfo.weight} ${fontInfo.style})`, error);
         console.error(`[FontLoader] フォントパス: ${fontInfo.path}`);
-        
-        // ブラックリストを保存（非同期、エラーは無視）
-        this.saveDynamicBlacklist().catch(() => {});
-        
         return false;
       } finally {
         // 読み込み完了後、Promise を削除
@@ -210,13 +188,38 @@ export class FontLoader {
     }
   }
 
+  /** Windows/macOS/Linuxの絶対パスをCSSで利用できるfile URLへ変換する。 */
+  private static toFileUrl(filePath: string): string {
+    if (/^file:\/\//i.test(filePath)) return filePath;
+
+    const normalized = filePath.replace(/\\/g, '/');
+    const encoded = normalized
+      .split('/')
+      .map((segment, index) => {
+        if (index === 0 && /^[a-z]:$/i.test(segment)) return segment;
+        return encodeURIComponent(segment);
+      })
+      .join('/');
+
+    if (normalized.startsWith('//')) return `file:${encoded}`;
+    if (normalized.startsWith('/')) return `file://${encoded}`;
+    return `file:///${encoded}`;
+  }
+
+  private static getFontWeightDescriptor(fontInfo: FontInfo): string {
+    if (fontInfo.variable || /variablefont|(?:^|[_-])wght(?:[_,-]|$)|\[.*wght.*\]/i.test(fontInfo.path || '')) {
+      return '100 900';
+    }
+    return fontInfo.weight || 'normal';
+  }
+
   /**
    * フォントが読み込み済みかチェック
    * @param fontFamily フォントファミリー名
    * @returns 読み込み済みの場合true
    */
   static isLoaded(fontFamily: string): boolean {
-    return this.loadedFonts.has(fontFamily);
+    return this.loadedFamilies.has(fontFamily);
   }
 
   /**

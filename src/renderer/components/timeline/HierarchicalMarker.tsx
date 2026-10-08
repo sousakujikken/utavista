@@ -35,6 +35,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
   isRightOuterMarker = false,
   children,
   onDragStart,
+  onDragEnd,
   isActivated = false
 }) => {
   // ドラッグ状態管理（React再レンダリングから完全保護）
@@ -46,6 +47,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
     startUnitEnd: number;
     operationType: 'move' | 'resizeLeft' | 'resizeRight' | null;
     isActive: boolean;
+    hasChanged: boolean;
   }>({
     isDragging: false,
     isResizing: null,
@@ -53,7 +55,8 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
     startUnitStart: 0,
     startUnitEnd: 0,
     operationType: null,
-    isActive: false
+    isActive: false,
+    hasChanged: false
   });
 
   // レガシー状態（後方互換性のため）
@@ -184,6 +187,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
     newDragState.startUnitEnd = unit.end;
     newDragState.operationType = dragType;
     newDragState.isActive = true;
+    newDragState.hasChanged = false;
 
     // レガシー状態も更新（後方互換性のため）
     absoluteDragDataRef.current = {
@@ -244,6 +248,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
     if (Math.abs(deltaMs) < 0.1) {
       return;
     }
+    dragData.hasChanged = true;
 
     let newStart: number;
     let newEnd: number;
@@ -297,6 +302,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     // 新しいドラッグ状態をクリア
     const dragData = dragStateRef.current;
+    const completedDrag = dragData.isActive && dragData.hasChanged;
     dragData.isDragging = false;
     dragData.isResizing = null;
     dragData.startMouseX = 0;
@@ -304,6 +310,7 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
     dragData.startUnitEnd = 0;
     dragData.operationType = null;
     dragData.isActive = false;
+    dragData.hasChanged = false;
 
     // レガシー状態もクリア
     if (absoluteDragDataRef.current) {
@@ -324,7 +331,8 @@ const HierarchicalMarker: React.FC<HierarchicalMarkerProps> = ({
     // デバッグログ: ドラッグ終了（簡潔版）
     if (multiSelected && import.meta.env.DEV) {
       }
-  }, [multiSelected, unit.id]);
+    if (completedDrag) onDragEnd?.();
+  }, [multiSelected, unit.id, onDragEnd]);
 
   // スタイルの計算（新しいドラッグ状態を参照）
   const isDraggingState = dragStateRef.current.isDragging || dragState.isDragging;

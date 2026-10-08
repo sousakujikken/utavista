@@ -7,6 +7,9 @@ import * as os from 'os';
 import * as fsSync from 'fs';
 import type { ExportOptions, ExportProgress, ExportError } from '../shared/types';
 import { BatchVideoProcessor } from './BatchVideoProcessor';
+import { resolveFFmpegBinary } from './ffmpegPath';
+import { AAC_AUDIO_ARGS } from './audioEncoding';
+import { AlphaVideoExporter, AlphaExportStartOptions } from './AlphaVideoExporter';
 
 export class ExportManager {
   private ffmpegPath: string;
@@ -43,15 +46,7 @@ export class ExportManager {
   }
   
   private getFFmpegPath(): string {
-    // For development, use system ffmpeg
-    // In production, this would be bundled with the app
-    const platform = process.platform;
-    
-    if (platform === 'win32') {
-      return 'ffmpeg.exe';
-    } else {
-      return 'ffmpeg';
-    }
+    return resolveFFmpegBinary('ffmpeg');
   }
   
   async startExport(options: ExportOptions): Promise<void> {
@@ -208,7 +203,7 @@ export class ExportManager {
       if (options.audioPath) {
         ffmpegArgs.splice(-2, 0, 
           '-i', options.audioPath,
-          '-c:a', 'aac',
+          ...AAC_AUDIO_ARGS,
           '-shortest' // Match shortest stream duration
         );
       }
@@ -355,6 +350,7 @@ export function setupExportHandlers() {
     width: number;
     height: number;
     audioPath?: string;
+    audioStartMs?: number;
     outputPath?: string;
   }) => {
     try {
@@ -428,7 +424,43 @@ export function setupExportHandlers() {
       throw error;
     }
   });
-  
+
+  // 透過背景の書き出し（ProRes 4444）。RGBAフレームをFFmpegへ直接流す。
+  const alphaVideoExporter = new AlphaVideoExporter();
+  // 書き出し先（上書き・失敗時の削除対象）は、保存ダイアログでユーザーが選んだパスに限る。
+  // レンダラーから任意のパスを指定してファイルを上書き・削除できないようにするため。
+  const approvedAlphaOutputPaths = new Set<string>();
+  ipcMain.handle('export:alpha:start', async (_event, options: AlphaExportStartOptions) => {
+    const outputPath = typeof options?.outputPath === 'string' ? path.resolve(options.outputPath) : '';
+    if (!approvedAlphaOutputPaths.delete(outputPath)) {
+      throw new Error('透過動画の保存先が保存ダイアログで選択されたものではありません');
+    }
+    alphaVideoExporter.start({ ...options, outputPath });
+  });
+  ipcMain.handle('export:alpha:frame', async (_event, payload: { sessionId: string; data: Uint8Array }) => {
+    await alphaVideoExporter.writeFrame(payload.sessionId, payload.data);
+  });
+  ipcMain.handle('export:alpha:finalize', async (_event, options: { sessionId: string }) => {
+    return await alphaVideoExporter.finalize(options.sessionId);
+  });
+  ipcMain.handle('export:alpha:cancel', async (_event, options: { sessionId: string }) => {
+    await alphaVideoExporter.cancel(options.sessionId);
+  });
+  ipcMain.handle('export:showSaveDialogForAlphaVideo', async (_event, defaultFileName: string) => {
+    const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const { filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: '透過動画を保存',
+      defaultPath: defaultFileName,
+      filters: [
+        { name: 'QuickTime (ProRes 4444)', extensions: ['mov'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+    if (!filePath) return null;
+    approvedAlphaOutputPaths.add(path.resolve(filePath));
+    return filePath;
+  });
+
   ipcMain.handle('export:saveFrameImage', async (event, sessionId: string, frameName: string, frameData: Uint8Array, width?: number, height?: number) => {
     try {
       return await exportManager.batchVideoProcessor.saveFrameImage(sessionId, frameName, frameData, width, height);

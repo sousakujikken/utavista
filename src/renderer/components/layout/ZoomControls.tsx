@@ -1,30 +1,58 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import '../../styles/components.css';
 import Engine from '../../engine/Engine';
+import { Button } from '../common';
 
 interface ZoomControlsProps {
-  zoomLevel: number;
   viewStart: number;
   viewEnd: number;
   totalDuration: number;
-  maxZoomLevel: number;
+  /** 現在の表示時間（ms） */
+  viewDuration: number;
+  /** 表示時間の下限・上限（ms） */
+  minViewDuration: number;
+  maxViewDuration: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
-  zoomLevels: number[];
+  /** スライダーで表示時間を直接指定する */
+  onViewDurationChange: (duration: number) => void;
   engine?: Engine; // Undo/Redo機能のためにEngineインスタンスを受け取る
 }
 
+/** スライダーの分解能。表示時間は対数目盛りで割り当て、短い範囲でも細かく調整できるようにする。 */
+const SLIDER_STEPS = 1000;
+
 const ZoomControls: React.FC<ZoomControlsProps> = ({
-  zoomLevel,
   viewStart,
   viewEnd,
   totalDuration,
-  maxZoomLevel,
+  viewDuration,
+  minViewDuration,
+  maxViewDuration,
   onZoomIn,
   onZoomOut,
-  zoomLevels,
+  onViewDurationChange,
   engine
 }) => {
+  const zoomRange = Math.max(1, maxViewDuration / minViewDuration);
+  // 左ほど広く（縮小）、右ほど詳細（拡大）になるよう、表示時間の対数を反転して割り当てる
+  const sliderValue = maxViewDuration > minViewDuration
+    ? Math.round((1 - Math.log(viewDuration / minViewDuration) / Math.log(zoomRange)) * SLIDER_STEPS)
+    : SLIDER_STEPS;
+  const sliderToDuration = (value: number) => minViewDuration * Math.pow(zoomRange, 1 - value / SLIDER_STEPS);
+  const canZoomIn = viewDuration > minViewDuration + 1;
+  const canZoomOut = viewDuration < maxViewDuration - 1;
+  const formatViewDuration = (ms: number) => ms >= 10000
+    ? `${Math.round(ms / 1000)}秒表示`
+    : `${(ms / 1000).toFixed(1)}秒表示`;
+  const [, refreshHistoryState] = useState(0);
+
+  useEffect(() => {
+    const handleHistoryChange = () => refreshHistoryState(value => value + 1);
+    window.addEventListener('undo-redo-state-changed', handleHistoryChange);
+    return () => window.removeEventListener('undo-redo-state-changed', handleHistoryChange);
+  }, []);
+
   const formatTime = (ms: number): string => {
     const totalSeconds = Math.floor(ms / 1000);
     const minutes = Math.floor(totalSeconds / 60);
@@ -77,101 +105,46 @@ const ZoomControls: React.FC<ZoomControlsProps> = ({
         <div>/ {formatTime(totalDuration)}</div>
       </div>
       
-      {/* Undo/Redoボタン */}
-      <div style={{
-        display: 'flex',
-        gap: '4px'
-      }}>
-        <button 
-          onClick={handleUndo}
-          disabled={!engine || !engine.canUndo()}
-          style={{
-            padding: '4px 8px',
-            background: (!engine || !engine.canUndo()) ? '#555' : '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            fontSize: '11px',
-            cursor: (!engine || !engine.canUndo()) ? 'not-allowed' : 'pointer',
-            minWidth: '50px'
-          }}
-          title="元に戻す (Undo)"
-        >
+      {/* Undo/Redoボタン（補助操作のため共通の灰色ボタン） */}
+      <div style={{ display: 'flex', gap: '4px' }}>
+        <Button size="small" onClick={handleUndo} disabled={!engine || !engine.canUndo()} title="元に戻す (Undo)">
           ↶ 戻す
-        </button>
-        <button 
-          onClick={handleRedo}
-          disabled={!engine || !engine.canRedo()}
-          style={{
-            padding: '4px 8px',
-            background: (!engine || !engine.canRedo()) ? '#555' : '#ffc107',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            fontSize: '11px',
-            cursor: (!engine || !engine.canRedo()) ? 'not-allowed' : 'pointer',
-            minWidth: '50px'
-          }}
-          title="やり直し (Redo)"
-        >
+        </Button>
+        <Button size="small" onClick={handleRedo} disabled={!engine || !engine.canRedo()} title="やり直し (Redo)">
           ↷ やり直し
-        </button>
+        </Button>
       </div>
-      
-      {/* ズームコントロールボタン */}
-      <div style={{
-        display: 'flex',
-        gap: '4px'
-      }}>
-        <button 
-          onClick={onZoomIn}
-          disabled={zoomLevel === 0}
-          style={{
-            padding: '4px 8px',
-            background: zoomLevel === 0 ? '#555' : '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            fontSize: '14px',
-            cursor: zoomLevel === 0 ? 'not-allowed' : 'pointer',
-            minWidth: '50px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-          title="より詳細に表示"
-        >
-          🔍+
-        </button>
-        <button 
-          onClick={onZoomOut}
-          disabled={zoomLevel === maxZoomLevel || Math.min(zoomLevels[zoomLevel + 1] || Infinity, totalDuration) <= (viewEnd - viewStart)}
-          style={{
-            padding: '4px 8px',
-            background: (zoomLevel === maxZoomLevel || Math.min(zoomLevels[zoomLevel + 1] || Infinity, totalDuration) <= (viewEnd - viewStart)) ? '#555' : '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            fontSize: '14px',
-            cursor: (zoomLevel === maxZoomLevel || Math.min(zoomLevels[zoomLevel + 1] || Infinity, totalDuration) <= (viewEnd - viewStart)) ? 'not-allowed' : 'pointer',
-            minWidth: '50px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-          title="より広く表示"
-        >
+
+      {/* ズーム（ボタンは段階的に、スライダーとCtrl+ホイールは連続的に変更） */}
+      <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+        <Button size="small" onClick={onZoomOut} disabled={!canZoomOut} title="より広く表示（Ctrl+ホイール下でも縮小）">
           🔍−
-        </button>
+        </Button>
+        <input
+          type="range"
+          className="zoom-slider"
+          min={0}
+          max={SLIDER_STEPS}
+          step={1}
+          value={sliderValue}
+          disabled={maxViewDuration <= minViewDuration}
+          onChange={event => onViewDurationChange(sliderToDuration(Number(event.target.value)))}
+          title="表示範囲（右ほど詳細）"
+          aria-label="タイムラインの表示範囲"
+          style={{ width: '96px', accentColor: 'var(--color-accent)' }}
+        />
+        <Button size="small" onClick={onZoomIn} disabled={!canZoomIn} title="より詳細に表示（Ctrl+ホイール上でも拡大）">
+          🔍+
+        </Button>
       </div>
-      
-      <div style={{ 
-        color: '#666', 
-        fontSize: '9px',
+
+      <div style={{
+        color: '#999',
+        fontSize: '10px',
         textAlign: 'center',
         minWidth: '60px'
       }}>
-        {Math.floor((viewEnd - viewStart) / 1000)}秒表示
+        {formatViewDuration(viewDuration)}
       </div>
     </div>
   );

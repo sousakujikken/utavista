@@ -3,43 +3,39 @@ import type { BrowserWindow as BrowserWindowType } from 'electron';
 const { app, BrowserWindow, ipcMain } = electron;
 import * as path from 'path';
 import { initFileLogger } from './logging';
-import { setupFileHandlers } from './fileManager';
+import { fileManager, setupFileHandlers } from './fileManager';
 import { setupExportHandlers } from './exportManager';
 import { fontManager } from './fontManager';
 import { persistenceManager } from './persistenceManager';
+import { installCloseGuard } from './closeGuard';
+
+function findProjectPath(args: string[]): string | null {
+  const candidate = args.find(arg => path.extname(arg).toLowerCase() === '.uta');
+  return candidate ? path.resolve(candidate) : null;
+}
 
 // ---- Startup GPU/Compositor safety switches (must be set before app ready) ----
 // macOS 15.x + Chromium can crash WindowServer with CALayer overlays
 // under heavy surface churn (Invalid mailbox / overlay spam). Disable overlays
 // and hardware video decode to keep composition stable during export.
 try {
-  app.commandLine.appendSwitch('disable-mac-overlays');
-  app.commandLine.appendSwitch('disable-accelerated-video-decode');
-  // Reduce IOSurface/zero-copy pressure on macOS (stabilize WindowServer)
-  app.commandLine.appendSwitch('disable-gpu-memory-buffer-compositor-resources');
-  app.commandLine.appendSwitch('disable-zero-copy');
-  // Prefer Metal path for ANGLE to avoid EGL warnings on macOS
-  app.commandLine.appendSwitch('use-angle', 'metal');
-  // Keep GPU enabled for general rendering; avoid full software fallback by default.
-  // If issues persist, consider enabling one of the following as a last resort:
-  // app.disableHardwareAcceleration();
-  // app.commandLine.appendSwitch('use-gl', 'swiftshader');
-  // app.commandLine.appendSwitch('disable-gpu');
-  // Log applied switches for diagnostics
-  // Note: process.argv doesn't include appendSwitch entries, so log explicitly
-  console.log('[Startup] Applied Chromium switches:', {
-    disableMacOverlays: true,
-    disableAcceleratedVideoDecode: true,
-    disableGpuMemoryBufferCompositorResources: true,
-    disableZeroCopy: true,
-    useAngle: 'metal'
-  });
+  if (process.platform === 'darwin') {
+    app.commandLine.appendSwitch('disable-mac-overlays');
+    app.commandLine.appendSwitch('disable-accelerated-video-decode');
+    // Reduce IOSurface/zero-copy pressure on macOS (stabilize WindowServer)
+    app.commandLine.appendSwitch('disable-gpu-memory-buffer-compositor-resources');
+    app.commandLine.appendSwitch('disable-zero-copy');
+    // MetalはmacOS専用。Windowsへ渡すとANGLE初期化失敗の原因になる。
+    app.commandLine.appendSwitch('use-angle', 'metal');
+    console.log('[Startup] Applied macOS Chromium safety switches');
+  }
 } catch (e) {
   console.warn('Failed to apply Chromium switches:', e);
 }
 
 class ElectronApp {
   private mainWindow: BrowserWindowType | null = null;
+  private pendingProjectPath: string | null = null;
   
   async initialize() {
     await app.whenReady();
@@ -93,14 +89,37 @@ class ElectronApp {
         console.error('Failed to load Vite dev server:', error);
         console.log('Make sure npm run dev is running on port 5173');
       });
-      this.mainWindow.webContents.openDevTools();
     } else {
       // プロダクションビルド時のHTMLファイルパス
-      const rendererPath = path.join(__dirname, '../renderer/index.html');
+      const rendererPath = path.join(app.getAppPath(), 'dist', 'renderer', 'index.html');
       console.log('Loading renderer from:', rendererPath);
-      this.mainWindow.loadFile(rendererPath);
+      void this.mainWindow.loadFile(rendererPath).catch((error) => {
+        console.error('Failed to load packaged renderer:', {
+          rendererPath,
+          error
+        });
+      });
     }
+
+    this.mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      console.error('Renderer failed to load:', {
+        errorCode,
+        errorDescription,
+        validatedURL
+      });
+    });
+
+    this.mainWindow.webContents.on('render-process-gone', (_event, details) => {
+      console.error('Renderer process exited:', details);
+    });
+
+    this.mainWindow.webContents.on('did-finish-load', () => {
+      this.notifyPendingProject();
+    });
     
+    // 未保存の変更があれば閉じる前に確認する
+    installCloseGuard(this.mainWindow);
+
     // Window event handlers
     this.mainWindow.on('closed', () => {
       this.mainWindow = null;
@@ -122,6 +141,15 @@ class ElectronApp {
     
     ipcMain.handle('app:get-path', (event, name: string) => {
       return app.getPath(name as any);
+    });
+
+    ipcMain.handle('file:consume-pending-project', async () => {
+      const projectPath = this.pendingProjectPath;
+      if (!projectPath) return null;
+
+      const projectData = await fileManager.loadProjectFromPath(projectPath);
+      this.pendingProjectPath = null;
+      return projectData;
     });
     
     // GPU/システムメモリ情報取得ハンドラ
@@ -367,24 +395,56 @@ class ElectronApp {
       });
     });
 
-    // GPU/child process crash diagnostics
-    app.on('gpu-process-crashed', (event, killed) => {
-      console.error('[GPU] gpu-process-crashed:', { killed });
-    });
-
-    app.on('child-process-gone', (event, details) => {
-      console.error('[GPU] child-process-gone:', details);
+    // GPU/child process crash diagnostics. `gpu-process-crashed` was removed
+    // from recent Electron versions; GPU failures are reported here instead.
+    app.on('child-process-gone', (_event, details) => {
+      const processLabel = details.type === 'GPU' ? '[GPU]' : '[Child Process]';
+      console.error(`${processLabel} child-process-gone:`, details);
     });
   }
   
   getMainWindow(): BrowserWindowType | null {
     return this.mainWindow;
   }
+
+  queueProjectOpen(projectPath: string | null): void {
+    if (!projectPath) return;
+    this.pendingProjectPath = path.resolve(projectPath);
+    this.notifyPendingProject();
+
+    if (this.mainWindow) {
+      if (this.mainWindow.isMinimized()) this.mainWindow.restore();
+      this.mainWindow.show();
+      this.mainWindow.focus();
+    }
+  }
+
+  private notifyPendingProject(): void {
+    if (!this.pendingProjectPath || !this.mainWindow || this.mainWindow.isDestroyed()) return;
+    this.mainWindow.webContents.send('file:open-project-requested');
+  }
 }
 
 // Initialize the application
 const electronApp = new ElectronApp();
-electronApp.initialize().catch(console.error);
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  electronApp.queueProjectOpen(findProjectPath(process.argv));
+
+  app.on('second-instance', (_event, commandLine) => {
+    electronApp.queueProjectOpen(findProjectPath(commandLine));
+  });
+
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
+    electronApp.queueProjectOpen(filePath);
+  });
+
+  electronApp.initialize().catch(console.error);
+}
 
 // Export for use by other modules
 export { electronApp };

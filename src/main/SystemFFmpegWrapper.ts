@@ -10,6 +10,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
+import { resolveFFmpegBinary } from './ffmpegPath';
+import { AAC_AUDIO_ARGS } from './audioEncoding';
 
 export interface BatchVideoOptions {
   sessionId: string;
@@ -67,18 +69,7 @@ export class SystemFFmpegWrapper {
    * システムFFmpegパスの取得
    */
   private getFFmpegPath(): string {
-    const platform = process.platform;
-    
-    // 開発環境ではシステムFFmpegを使用
-    // プロダクション環境では同梱FFmpegを使用予定
-    if (platform === 'win32') {
-      return 'ffmpeg.exe';
-    } else if (platform === 'darwin') {
-      // macOS: Homebrewまたはシステムインストール
-      return '/opt/homebrew/bin/ffmpeg'; // M1/M2 Mac
-    } else {
-      return 'ffmpeg';
-    }
+    return resolveFFmpegBinary('ffmpeg');
   }
 
   /**
@@ -145,6 +136,8 @@ export class SystemFFmpegWrapper {
     width: number;
     height: number;
     audioPath?: string;
+    /** 書き出し範囲の開始時刻。音声もこの位置から切り出す。 */
+    audioStartMs?: number;
     outputPath?: string; // full path
     totalFrames?: number;
     totalDurationMs?: number;
@@ -164,7 +157,13 @@ export class SystemFFmpegWrapper {
       '-i', options.h264Path
     ];
 
-    const audioArgs = options.audioPath ? ['-i', options.audioPath, '-c:a', 'aac'] : [];
+    const audioArgs = options.audioPath
+      ? [
+        ...(options.audioStartMs ? ['-ss', (options.audioStartMs / 1000).toFixed(3)] : []),
+        '-i', options.audioPath,
+        ...AAC_AUDIO_ARGS
+      ]
+      : [];
 
     // Re-encode with libx264 to embed explicit CFR/fps metadata (most compatible)
     const args = [
@@ -566,8 +565,7 @@ OutputDir: ${outputDir}
           '-c:v', 'libx264',
           '-preset', 'medium',
           '-crf', '23',
-          '-c:a', 'aac',
-          '-b:a', '128k',
+          ...AAC_AUDIO_ARGS,
           '-shortest'
         );
       } else {
@@ -588,8 +586,7 @@ OutputDir: ${outputDir}
       if (includeMusicTrack && audioPath) {
         ffmpegArgs.push(
           '-c:v', 'copy', // 動画ストリームはコピー（高速）
-          '-c:a', 'aac',
-          '-b:a', '128k',
+          ...AAC_AUDIO_ARGS,
           '-shortest' // 短い方のストリームに合わせる
         );
       } else {
@@ -747,7 +744,7 @@ OutputDir: ${outputDir}
     frameCount: number;
   }> {
     return new Promise((resolve, reject) => {
-      const ffprobePath = this.ffmpegPath.replace('ffmpeg', 'ffprobe');
+      const ffprobePath = resolveFFmpegBinary('ffprobe');
       const args = [
         '-v', 'quiet',
         '-print_format', 'json',
@@ -878,7 +875,7 @@ OutputDir: ${outputDir}
     height: number;
   }> {
     return new Promise((resolve, reject) => {
-      const ffprobePath = this.ffmpegPath.replace('ffmpeg', 'ffprobe');
+      const ffprobePath = resolveFFmpegBinary('ffprobe');
       const args = [
         '-v', 'quiet',
         '-select_streams', 'v:0',
@@ -1147,7 +1144,7 @@ OutputDir: ${outputDir}
     height: number;
   }> {
     return new Promise((resolve, reject) => {
-      const ffprobePath = this.ffmpegPath.replace('ffmpeg', 'ffprobe');
+      const ffprobePath = resolveFFmpegBinary('ffprobe');
       const args = [
         '-v', 'quiet',
         '-print_format', 'json',

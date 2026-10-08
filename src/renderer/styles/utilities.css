@@ -15,6 +15,11 @@
 .u-mb-lg { margin-bottom: var(--space-lg); }
 .u-mb-xl { margin-bottom: var(--space-xl); }
 
+.u-ml-xs { margin-left: var(--space-xs); }
+
+/* 余白指定付きのラベルは入力欄の上に置く見出しとして扱う */
+label.u-mb-xs { display: block; }
+
 .u-p-xxs { padding: var(--space-xxs); }
 .u-p-xs { padding: var(--space-xs); }
 .u-p-sm { padding: var(--space-sm); }
@@ -48,6 +53,9 @@
 .u-border { border: 1px solid var(--border-standard); }
 .u-border-subtle { border: 1px solid var(--border-subtle); }
 .u-border-prominent { border: 1px solid var(--border-prominent); }
+.u-border-none { border: none; }
+.u-bg-transparent { background-color: transparent; }
+.u-cursor-pointer { cursor: pointer; }
 
 /* Border radius utilities */
 .u-radius-subtle { border-radius: var(--radius-subtle); }
@@ -60,10 +68,14 @@
 .u-flex-column { flex-direction: column; }
 .u-flex-center { align-items: center; justify-content: center; }
 .u-flex-between { justify-content: space-between; }
+.u-justify-between { justify-content: space-between; }
+.u-align-center { align-items: center; }
 .u-flex-end { justify-content: flex-end; }
 .u-gap-xs { gap: var(--space-xs); }
 .u-gap-sm { gap: var(--space-sm); }
 .u-gap-md { gap: var(--space-md); }
+.u-grid { display: grid; }
+.u-grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 /* Width utilities */
 .u-w-full { width: 100%; }

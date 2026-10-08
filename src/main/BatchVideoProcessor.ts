@@ -11,6 +11,7 @@ import { BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fsSync from 'fs';
 import * as os from 'os';
+import type { LockstepPlugin } from './plugins/LockstepPlugin';
 
 export interface VideoExportRequest {
   sessionId: string;
@@ -62,10 +63,10 @@ export class BatchVideoProcessor {
   private isProcessing = false;
   // WebCodecs lockstep session state
   private wcWriters: Map<string, import('fs').WriteStream> = new Map();
-  private wcMeta: Map<string, { fps: number; width: number; height: number; fileName: string; audioPath?: string; outputPath?: string; h264Path: string; totalFrames?: number; totalDurationMs?: number } > = new Map();
+  private wcMeta: Map<string, { fps: number; width: number; height: number; fileName: string; audioPath?: string; audioStartMs?: number; outputPath?: string; h264Path: string; totalFrames?: number; totalDurationMs?: number } > = new Map();
   private _muxStartTimes?: Map<string, number>;
   // Lockstep plugin (native or system fallback)
-  private lockstepPlugin = require('./plugins/PluginRegistry').getLockstepPlugin();
+  private lockstepPlugin: LockstepPlugin = require('./plugins/PluginRegistry').getLockstepPlugin();
   
   constructor() {
     this.ffmpegWrapper = new SystemFFmpegWrapper();
@@ -98,8 +99,8 @@ export class BatchVideoProcessor {
   // WebCodecs lockstep export API
   // ==============================
 
-  async webcodecsStart(options: { sessionId: string; fileName: string; fps: number; width: number; height: number; audioPath?: string; outputPath?: string; totalFrames?: number; totalDurationMs?: number }): Promise<void> {
-    const { sessionId, fileName, fps, width, height, audioPath, outputPath, totalFrames, totalDurationMs } = options;
+  async webcodecsStart(options: { sessionId: string; fileName: string; fps: number; width: number; height: number; audioPath?: string; audioStartMs?: number; outputPath?: string; totalFrames?: number; totalDurationMs?: number }): Promise<void> {
+    const { sessionId, fileName, fps, width, height, audioPath, audioStartMs, outputPath, totalFrames, totalDurationMs } = options;
     const session = this.tempFileManager.getTempSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
@@ -110,7 +111,7 @@ export class BatchVideoProcessor {
     const h264Path = path.join(dir, 'video.h264');
     const ws = fs.createWriteStream(h264Path);
     this.wcWriters.set(sessionId, ws);
-    this.wcMeta.set(sessionId, { fps, width, height, fileName, audioPath, outputPath, h264Path, totalFrames, totalDurationMs });
+    this.wcMeta.set(sessionId, { fps, width, height, fileName, audioPath, audioStartMs, outputPath, h264Path, totalFrames, totalDurationMs });
   }
 
   async webcodecsAppendChunk(payload: { sessionId: string; data: Uint8Array; isKey: boolean; timestamp: number; duration?: number }): Promise<void> {
@@ -140,6 +141,7 @@ export class BatchVideoProcessor {
         width: meta.width,
         height: meta.height,
         audioPath: meta.audioPath,
+        audioStartMs: meta.audioStartMs,
         outputPath: meta.outputPath,
         totalFrames: meta.totalFrames,
         totalDurationMs: meta.totalDurationMs

@@ -29,6 +29,7 @@ export interface HierarchicalMarkerProps {
   isRightOuterMarker?: boolean;  // 複数選択時の右端マーカーかどうか
   children?: React.ReactNode;
   onDragStart?: (unitId: string, operationType: string) => void;
+  onDragEnd?: () => void;
   isActivated?: boolean;         // 明示的にアクティブ化されているかどうか
 }
 

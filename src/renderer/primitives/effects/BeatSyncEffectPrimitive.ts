@@ -149,7 +149,7 @@ export class BeatSyncEffectPrimitive {
     currentTime: number,
     phraseId: string
   ): boolean {
-    if (!params.enableBeatSync || this.beatMarkers.length === 0) {
+    if (!params.enableBeatSync) {
       return false;
     }
 
